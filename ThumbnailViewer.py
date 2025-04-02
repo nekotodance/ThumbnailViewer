@@ -7,7 +7,8 @@ from PyQt5.QtWidgets import (
     QStatusBar, QMainWindow, QLabel, QStackedWidget, QPushButton, QLineEdit, QSpinBox
 )
 from PyQt5.QtGui import (
-    QPixmap, QPainter, QColor, QIcon, QPalette, QMouseEvent, QWheelEvent
+    QPixmap, QPainter, QColor, QIcon, QPalette, QMouseEvent, QWheelEvent,
+    QMovie, QImageReader
 )
 from PyQt5.QtCore import (
     Qt, QRunnable, QThreadPool, QThread, pyqtSignal, QEvent, QSize
@@ -22,6 +23,9 @@ DEF_FILENAME_TOP_LEN = 8
 DEF_FILENAME_OMIT = ".."
 DEF_FCOPY_DIR1 = "W:/_temp/ai"
 DEF_FCOPY_DIR2 = "W:/_temp/ai2"
+
+DEF_SUPPORT_IMAGE = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp")
+DEF_SUPPORT_MOVIE = (".gif", ".webp")
 
 WINDOW_TITLE = "Thumbnail Viewer"
 SETTINGS_FILE = "ThumbnailViewer_settings.json"
@@ -153,6 +157,7 @@ class ThumbnailViewer(QMainWindow):
         self.thumbnailnum = 0
         self.pydir = os.path.dirname(os.path.abspath(__file__))
         self.isCreateThumbnail = False
+        self.webpmovie = None   # 画像表示でwebpだった場合のプレイヤー
 
     # サムネイルサイズの設定
     def set_thmbnail_size(self, tsize):
@@ -167,29 +172,38 @@ class ThumbnailViewer(QMainWindow):
 
     # ドラッグエンターイベント
     def dragEnterEvent(self, event):
-        if self.get_status_createthumb():
-            return  #サムネイル作成中
+        #ToDo:サブスレッドが立ち上がるまでの物凄く短い期間でドロップすると落ちる事がある
+        #安全策を取りたい場合は以下の判定を有効にしてサムネイル作成完了まではドロップ禁止にする
+        #if self.get_status_createthumb(): return  #サムネイル作成中
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
     # ドロップイベント
     def dropEvent(self, event):
-        if self.get_status_createthumb():
-            return  #サムネイル作成中
+        #ToDo:サブスレッドが立ち上がるまでの物凄く短い期間でドロップすると落ちる事がある
+        #安全策を取りたい場合は以下の判定を有効にしてサムネイル作成完了まではドロップ禁止にする
+        #if self.get_status_createthumb(): return  #サムネイル作成中
+
+        #画像表示中にドロップされた場合にリストに戻る
+        if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
+            self.backToList()
+
         urls = event.mimeData().urls()
         file_paths = [url.toLocalFile() for url in urls]
         self.create_thumbnails(file_paths)
 
     # スタック表示画像からリストへの復帰処理
     def backToList(self, event=None):
+        self.stop_WEbpMovie()
         self.stack.setCurrentIndex(0)
 
     # ウインドウリサイズイベント（スタック表示画像用。リストは自動でアジャスト）
     def resizeEvent(self, event):
         if self.stack.currentIndex() == 1 and self.selected_file != "":
-            pixmap = QPixmap(self.selected_file)
-            scaled_pixmap = pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.image_label.setPixmap(scaled_pixmap)
+            if self.selected_file.lower().endswith(DEF_SUPPORT_MOVIE):
+                self.resize_MovieLabel(self.selected_file)
+            else:
+                self.resize_ImageLabel(self.selected_file)
 
     #ListWidght用のキーイベントフィルター
     def eventFilter(self, obj, event):
@@ -281,11 +295,46 @@ class ThumbnailViewer(QMainWindow):
 
     # 画像のスタックラベルへの読み込み
     def load_image_stack(self,file):
+        """毎度忘れる。。。
+        sizemain = self.size()  #ウインドウのサイズ（これはステータスバーやメニューバーを含むのでダメ）
+        sizecontent = self.centralWidget().size()   #コンテンツ領域のサイズ（これが正解）
+        sizestack = self.stack.size()   #一番上のウィジェットのサイズ（ちなみにここは上と同じ）
+        """
         if file != "":
             self.selected_file = file
-            pixmap = QPixmap(self.selected_file)
-            scaled_pixmap = pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.image_label.setPixmap(scaled_pixmap)
+            self.stop_WEbpMovie()
+            if self.selected_file.lower().endswith(DEF_SUPPORT_MOVIE):
+                self.webpmovie = QMovie(file)
+                self.image_label.setMovie(self.webpmovie)
+                self.webpmovie.setScaledSize(self.get_fit_size(QImageReader(file).size(), self.centralWidget().size()))
+                self.webpmovie.start()
+            else:
+                self.resize_ImageLabel(self.selected_file)
+
+    # 元のサイズをターゲットサイズにフィットさせた場合のサイズを取得
+    def get_fit_size(self, size_org, size_target):
+        scaled_width = size_target.width()
+        scaled_height = int(size_org.height() * (scaled_width / size_org.width()))
+        if scaled_height > size_target.height():
+            scaled_height = size_target.height()
+            scaled_width = int(size_org.width() * (scaled_height / size_org.height()))
+        return QSize(scaled_width,scaled_height)
+
+    # 画像表示、もしくはサイズの更新する
+    def resize_MovieLabel(self, file_path):
+        self.webpmovie.setScaledSize(self.get_fit_size(QImageReader(file_path).size(), self.centralWidget().size()))
+
+    # 画像表示、もしくはサイズの更新する
+    def resize_ImageLabel(self, file_path):
+        pixmap = QPixmap(self.selected_file)
+        scaled_pixmap = pixmap.scaled(self.centralWidget().size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.image_label.setPixmap(scaled_pixmap)
+
+    # webpを再生中なら停止する
+    def stop_WEbpMovie(self):
+        if self.webpmovie != None:
+            self.webpmovie.stop()
+            self.webpmovie = None
 
     # ファイルのコピー処理
     def copy_file(self, file, destdir):
@@ -338,7 +387,9 @@ class ThumbnailViewer(QMainWindow):
 
     # アイコンリストのダブルクリックイベント
     def on_item_double_clicked(self):
-        self.open_image_stack(self.get_selected_item_filename())
+        #ダブルクリックからシングルクリックに変更
+        #self.open_image_stack(self.get_selected_item_filename())
+        pass
 
     # アイコンリストのクリックイベント
     def on_item_clicked(self, no):
@@ -353,6 +404,9 @@ class ThumbnailViewer(QMainWindow):
         if no == 0:     #左クリック
             if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
                 self.backToList()
+            else:
+                self.open_image_stack(self.get_selected_item_filename())
+
         elif no == 1:
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir1)
         elif no == 2:
@@ -387,10 +441,7 @@ class ThumbnailViewer(QMainWindow):
 
     # サムネイル作成状態の取得
     def get_status_createthumb(self):
-        #ToDo:サブスレッドが立ち上がるまでの物凄く短い期間でドロップすると落ちる事がある
-        #その場合は以下の処理を入れ替えて、サムネイル作成完了まではドロップ禁止にする
-        return False
-        #return self.isCreateThumbnail
+        return self.isCreateThumbnail
 
     # サムネイル生成処理
     def create_thumbnails(self, paths):
@@ -508,7 +559,7 @@ class ThumbnailViewer(QMainWindow):
     # 画像ファイルかチェック（拡張子のみ）
     def is_image(self, file_path):
         # 画像ファイルの拡張子チェック
-        return file_path.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"))
+        return file_path.lower().endswith(DEF_SUPPORT_IMAGE)
 
     # ファイル名の切りつめ処理（アイコンの幅までの省略表示用）
     def truncate_filename(self, file_name):
