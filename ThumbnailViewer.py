@@ -457,6 +457,8 @@ class ThumbnailViewer(QMainWindow):
         isRemoveOK = False
         if pos < self.list_widget.count():
             self.list_widget.takeItem(pos)
+            #管理テーブルからファイルを消す
+            self.file_paths.remove(file)
         if os.path.exists(file):
             try:
                 fullpath = os.path.abspath(file)
@@ -898,6 +900,9 @@ class SubThread(QThread):
                 break
             #最小のウェイト（入れると遅くなるけどUIは重くならない）
             self.sleep_microseconds(1)
+            #ファイル削除後はもうファイルがない可能性がある
+            if not os.path.exists(file_path):
+                continue
             pixmap, width, height = self.create_thumbnail(file_path)
             original_size = ""
             if pixmap:
