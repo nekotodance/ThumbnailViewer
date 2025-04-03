@@ -2,19 +2,63 @@ import sys
 import os
 import shutil
 import time
+import platform
+import ctypes
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QStatusBar, QMainWindow, QLabel, QStackedWidget, QPushButton, QLineEdit, QSpinBox
+    QStatusBar, QMainWindow, QLabel, QStackedWidget, QPushButton, QLineEdit, QSpinBox,
+    QStyledItemDelegate
 )
 from PyQt5.QtGui import (
     QPixmap, QPainter, QColor, QIcon, QPalette, QMouseEvent, QWheelEvent,
     QMovie, QImageReader
 )
 from PyQt5.QtCore import (
-    Qt, QRunnable, QThreadPool, QThread, pyqtSignal, QEvent, QSize
+    Qt, QRunnable, QThreadPool, QThread, pyqtSignal, QEvent, QSize, QRect
 )
 from PyQt5.QtMultimedia import QSound
 import pvsubfunc
+from send2trash import send2trash
+
+#========================================
+# 「初回のファイルコピー状態表示バッジ機能のON/OFF」
+# 大量の画像を表示する場合、初回のファイル存在チェックに時間がかかり結構ストレスです
+#  ・アプリ立ち上げ時にはコピー先フォルダが空前提の人はFalseに変更（もしくはHDDの人とか。。）
+#  ・多少遅くても起動時にコピー先フォルダにファイルが存在するかチェックしたい人はTrueのままで
+#========================================
+DEF_CHECK_BADGE_IS_ON = True
+
+#========================================
+#= 「キー割り当ての変更」
+#  Keyidは以下を参考に
+#= https://doc.qt.io/qt-5/qt.html#Key-enum
+#========================================
+# アイコンリストと画像表示でキー定義
+# カーソル移動 上
+KEYS_CURSOR_UP = [Qt.Key_W, Qt.Key_Up]
+# カーソル移動 下
+KEYS_CURSOR_DOWN = [Qt.Key_S, Qt.Key_Down]
+# カーソル移動 左
+KEYS_CURSOR_LEFT = [Qt.Key_A, Qt.Key_Left]
+# カーソル移動 右
+KEYS_CURSOR_RIGHT = [Qt.Key_D, Qt.Key_Right]
+# ページアップ
+KEYS_PAGE_UP = [Qt.Key_2, Qt.Key_PageUp]
+# ページダウン
+KEYS_PAGE_DOWN = [Qt.Key_X, Qt.Key_PageDown]
+# 全カーソルキー一覧
+KEYS_CURSOR_ALL = KEYS_CURSOR_UP + KEYS_CURSOR_DOWN + KEYS_CURSOR_LEFT + KEYS_CURSOR_RIGHT + KEYS_PAGE_UP + KEYS_PAGE_DOWN
+# コピー1
+KEYS_COPY1 = [Qt.Key_E, Qt.Key_Slash]
+# コピー2
+KEYS_COPY2 = [Qt.Key_Q, Qt.Key_Period]
+# デリート
+KEYS_DELETE = [Qt.Key_H, Qt.Key_Delete]
+# 画像表示へ移動
+KEYS_DISPIMG = [Qt.Key_F, Qt.Key_Enter, Qt.Key_Return]
+# 終了
+KEYS_END = [Qt.Key_Escape, Qt.Key_Comma]
+
 
 pvsubfunc._IS_DEBUG = 0 #デバッグログを出すなら1に
 DEF_THUMBNAIL_SIZE = 256
@@ -23,6 +67,17 @@ DEF_FILENAME_TOP_LEN = 8
 DEF_FILENAME_OMIT = ".."
 DEF_FCOPY_DIR1 = "W:/_temp/ai"
 DEF_FCOPY_DIR2 = "W:/_temp/ai2"
+DEF_BADGE_ICON1 = "TV_badge1_128.png"
+DEF_BADGE_ICON2 = "TV_badge2_128.png"
+
+DEF_EVENT_IMAGEORLIST = 0
+DEF_EVENT_COPYDIR1 = 1
+DEF_EVENT_COPYDIR2 = 2
+DEF_EVENT_DELETE = 3
+DEF_EVENT_MOVELEFT = 10
+DEF_EVENT_MOVERIGHT = 11
+DEF_EVENT_PAGEUP = 12
+DEF_EVENT_PAGEDOWN = 13
 
 DEF_SUPPORT_IMAGE = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp")
 DEF_SUPPORT_MOVIE = (".gif", ".webp")
@@ -37,34 +92,11 @@ THUMBNAIL_SIZE = "thmbnail-size"
 SOUND_BEEP = "sound-beep"
 SOUND_FCOPY_OK = "sound-fcopy-ok"
 SOUND_F_CANSEL = "sound-f-cansel"
+SOUND_F_DELETE = "sound-f-delete"
 IMAGE_FCOPY_DIR1 = "image-fcopy-dir1"
 IMAGE_FCOPY_DIR2 = "image-fcopy-dir2"
 APP_WIDTH = 800
 APP_HEIGHT = 480
-
-#========================================
-#= キー割り当ての変更時のKeyidは以下を参考に
-#= https://doc.qt.io/qt-5/qt.html#Key-enum
-#========================================
-# アイコンリストと画像表示でキー定義
-# カーソル移動 上
-KEYS_CURSOR_UP = [Qt.Key_W, Qt.Key_Up]
-# カーソル移動 下
-KEYS_CURSOR_DOWN = [Qt.Key_S, Qt.Key_Down]
-# カーソル移動 左
-KEYS_CURSOR_LEFT = [Qt.Key_A, Qt.Key_Left]
-# カーソル移動 右
-KEYS_CURSOR_RIGHT = [Qt.Key_D, Qt.Key_Right]
-# 全カーソルキー一覧
-KEYS_CURSOR_ALL = KEYS_CURSOR_UP + KEYS_CURSOR_DOWN + KEYS_CURSOR_LEFT + KEYS_CURSOR_RIGHT
-# コピー1
-KEYS_COPY1 = [Qt.Key_E, Qt.Key_Slash]
-# コピー2
-KEYS_COPY2 = [Qt.Key_Q, Qt.Key_Period]
-# 画像表示へ移動
-KEYS_DISPIMG = [Qt.Key_F, Qt.Key_Enter, Qt.Key_Return]
-# 終了
-KEYS_END = [Qt.Key_Escape, Qt.Key_Comma]
 
 #----------------------------------------
 # サムネイルビューアクラス
@@ -111,6 +143,7 @@ class ThumbnailViewer(QMainWindow):
         self.soundBeep = "PromptViewer_beep.wav"
         self.soundFileCopyOK = "PromptViewer_filecopyok.wav"
         self.soundFileCansel = "PromptViewer_filecansel.wav"
+        self.soundFileDelete = "PromptViewer_filedelete.wav"
         self.imageFileCopyDir1 = DEF_FCOPY_DIR1
         self.imageFileCopyDir2 = DEF_FCOPY_DIR2
         self.thmbsize = DEF_THUMBNAIL_SIZE
@@ -128,6 +161,7 @@ class ThumbnailViewer(QMainWindow):
         self.list_widget.setResizeMode(QListWidget.Adjust)
         self.list_widget.installEventFilter(self)
         self.list_widget.setDragEnabled(False)
+        self.list_widget.setItemDelegate(BadgeDelegate())
         # スタック表示画像
         self.image_label.setAlignment(Qt.AlignCenter)
         # ステータスバーのアイコンサイズ設定関連
@@ -219,7 +253,7 @@ class ThumbnailViewer(QMainWindow):
             if keyid in KEYS_DISPIMG:
                 self.open_image_stack(self.get_selected_item_filename())
             #キーの消費（eventFilter専用）
-            if keyid in KEYS_CURSOR_ALL + KEYS_COPY1 + KEYS_COPY2 + KEYS_END + KEYS_DISPIMG:
+            if keyid in KEYS_CURSOR_ALL + KEYS_COPY1 + KEYS_COPY2 + KEYS_END + KEYS_DISPIMG + KEYS_DELETE:
                 return True  # イベントをここで処理したとみなして消費
         return super().eventFilter(obj, event)
 
@@ -236,7 +270,7 @@ class ThumbnailViewer(QMainWindow):
             #裏のアイコンリストでカーソル移動と共に画像を更新
             self.load_image_stack(self.get_selected_item_filename())
         #有効キー以外で画像表示を閉じてアイコンリストに戻る
-        if keyid not in KEYS_CURSOR_ALL + KEYS_COPY1 + KEYS_COPY2 + KEYS_END:
+        if keyid not in KEYS_CURSOR_ALL + KEYS_COPY1 + KEYS_COPY2 + KEYS_END + KEYS_DELETE:
             if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
                 self.backToList()
         super().keyPressEvent(event)
@@ -253,39 +287,75 @@ class ThumbnailViewer(QMainWindow):
                 self.move_cursor(Qt.Key_Left)
             elif keyid in KEYS_CURSOR_RIGHT:
                 self.move_cursor(Qt.Key_Right)
+            elif keyid in KEYS_PAGE_UP:
+                self.move_cursor(Qt.Key_PageUp)
+            elif keyid in KEYS_PAGE_DOWN:
+                self.move_cursor(Qt.Key_PageDown)
         #コピー処理1
         if keyid in KEYS_COPY1:
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir1)
         #コピー処理2
         if keyid in KEYS_COPY2:
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir2)
+        #デリート処理
+        if keyid in KEYS_DELETE:
+            self.delete_file(self.get_selected_item_filename(), self.get_selectedIndex())
         #終了
         if keyid in KEYS_END:
             self.close()
 
     # カーソル移動処理
+    # ページUp/Downは、3行表示している場合は2行分移動
     def move_cursor(self, direction):
-        index = self.list_widget.selectedIndexes()
         count = self.list_widget.count()
+        pos = self.get_selectedIndex()
+        hnum = self.get_list_hcount()
+        vnum = max(1, self.get_list_vcount() - 1)   #表示行-1分スクロール
+        scrollnum = (hnum * vnum)   #横の項目数 * 行数で移動項目数
+        if pos != None:
+            posnew = pos
+            if direction == Qt.Key_Up:
+                posnew = max(0, pos - hnum)
+            elif direction == Qt.Key_Down:
+                posnew = min(count - 1, pos + hnum)
+            elif direction == Qt.Key_Left:
+                posnew = max(0, pos - 1)
+            elif direction == Qt.Key_Right:
+                posnew = min(count - 1, pos + 1)
+            elif direction == Qt.Key_PageUp:
+                posnew = max(0, pos - scrollnum)
+            elif direction == Qt.Key_PageDown:
+                posnew = min(count - 1, pos + scrollnum)
+
+            if pos != posnew:
+                self.list_widget.setCurrentRow(posnew)
+            else:
+                #self.play_wave(self.soundBeep) #鳴らすとちょっと耳障り
+                pass
+
+    # 現在選択しているリストのIndex（単体）を返す（未選択時はNone）
+    def get_selectedIndex(self):
+        pos = None
+        index = self.list_widget.selectedIndexes()
         if index and len(index) > 0:
             pos = index[0].row()
-            row = self.get_list_hcount()
-            if direction == Qt.Key_Up:
-                self.list_widget.setCurrentRow(max(0, pos - row))
-            elif direction == Qt.Key_Down:
-                self.list_widget.setCurrentRow(min(count - 1, pos + row))
-            elif direction == Qt.Key_Left:
-                self.list_widget.setCurrentRow(max(0, pos - 1))
-            elif direction == Qt.Key_Right:
-                self.list_widget.setCurrentRow(min(count - 1, pos + 1))
+        return pos
 
     # リストで選択中のファイル名を取得（フルパス）
     def get_selected_item_filename(self):
         filename = ""
+        item = self.get_selected_item()
+        if item:
+            filename = item.data(Qt.UserRole)
+        return filename
+
+    # リストで選択中のアイテムを取得
+    def get_selected_item(self):
+        result_item = None
         item = self.list_widget.selectedItems()
         if item and len(item) > 0:
-            filename = item[0].data(Qt.UserRole)
-        return filename
+            result_item = item[0]
+        return result_item
 
     # 画像のスタック表示
     def open_image_stack(self,file):
@@ -320,11 +390,11 @@ class ThumbnailViewer(QMainWindow):
             scaled_width = int(size_org.width() * (scaled_height / size_org.height()))
         return QSize(scaled_width,scaled_height)
 
-    # 画像表示、もしくはサイズの更新する
+    # 動画のサイズの更新する（単純なスケールのみ）
     def resize_MovieLabel(self, file_path):
         self.webpmovie.setScaledSize(self.get_fit_size(QImageReader(file_path).size(), self.centralWidget().size()))
 
-    # 画像表示、もしくはサイズの更新する
+    # 画像のサイズを更新する
     def resize_ImageLabel(self, file_path):
         pixmap = QPixmap(self.selected_file)
         scaled_pixmap = pixmap.scaled(self.centralWidget().size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -337,26 +407,90 @@ class ThumbnailViewer(QMainWindow):
             self.webpmovie = None
 
     # ファイルのコピー処理
-    def copy_file(self, file, destdir):
-        if not os.path.isfile(file):
-            self.show_statusbar_error(f"not exist file [{file}]")
+    def copy_file(self, file_path, destdir):
+        isCopyOK = -1
+        mes = ""
+        if not os.path.exists(file_path):
+            self.show_statusbar_error(f"error : not exist file [{file_path}]")
             return
-        if not os.path.isdir(destdir):
-            self.show_statusbar_error(f"not exist dir [{destdir}]")
+        if not os.path.exists(destdir):
+            self.show_statusbar_error(f"error : not exist dir [{destdir}]")
             return
 
-        dest_file = f"{destdir}/{os.path.basename(file)}"
+        dest_file = f"{destdir}/{os.path.basename(file_path)}"
+        if dest_file == file_path:
+            self.show_statusbar_error(f"error : Same folder [{dest_file}]")
+            return
 
         # コピー先に同名のファイルがすでに存在していれば削除のみ実行
         if os.path.exists(dest_file):
-            os.remove(dest_file)
-            self.show_statusbar_mes(f"copy cansel [{dest_file}]")
-            self.play_wave(self.soundFileCansel)
-            return
+            try:
+                os.remove(dest_file)
+                isCopyOK = 0
+                mes = f"copy cansel [{dest_file}]"
+            except Exception as e:
+                mes = f"error : copy cansel [{file_path}]"
+        else:
+            try:
+                shutil.copy2(file_path, destdir)
+                isCopyOK = 1
+                mes = f"copyed [{dest_file}]"
+            except Exception as e:
+                mes = f"error : copy [{dest_file}]"
 
-        shutil.copy2(file, destdir)
-        self.show_statusbar_mes(f"copyed [{dest_file}]")
-        self.play_wave(self.soundFileCopyOK)
+        # ファイルのコピー先ディレクトリにファイルが存在するかをバッジ表示
+        item = self.get_selected_item()
+        self.set_iconBadge(item, os.path.basename(file_path))
+
+        # 音の再生のために処理が遅れるので音の再生はここでまとめて行う
+        if isCopyOK == 1:
+            self.show_statusbar_mes(mes)
+            self.play_wave(self.soundFileCopyOK)
+        elif isCopyOK == 0:
+            self.show_statusbar_mes(mes)
+            self.play_wave(self.soundFileCansel)
+        else:
+            self.show_statusbar_error(mes)
+
+    # ファイルのデリート処理
+    def delete_file(self, file, pos):
+        isRemoveOK = False
+        if pos < self.list_widget.count():
+            self.list_widget.takeItem(pos)
+        if os.path.exists(file):
+            try:
+                fullpath = os.path.abspath(file)
+                #----memo----
+                # os.removeだと即時削除、send2trashライブラリを使うとゴミ箱に入る
+                # os.path.abspath(file)を使っているのは、
+                # 通常のパス文字列    「C:/test/hoge.jpg」だとsend2trashで例外が発生するため、
+                # OS依存のパス文字列  「C:\\test\\hoge.jpg」に変換する必要がある
+                #------------
+                #os.remove(file)     #きれいさっぱり消したい人用
+                send2trash(os.path.abspath(file))    #念のためゴミ箱に捨てたい人用
+                self.show_statusbar_mes(f"deleted [{file}]")
+                isRemoveOK = True
+            except Exception as e:
+                self.show_statusbar_error(f"error : delete [{file}]")
+
+        #画像表示中に削除された場合、リストに戻るか画像を更新
+        if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
+            if self.list_widget.count() == 0:
+                #表示する画像がないので空リストに戻るしかない
+                self.backToList()
+            else:
+                if pos < self.list_widget.count() - 1:
+                    #まだ先のrowが存在するので元々の次の画像に移動
+                    self.list_widget.setCurrentRow(pos)
+                else:
+                    #最終画像なので元々の前の画像に移動
+                    self.list_widget.setCurrentRow(self.list_widget.count() - 1)
+            #新しい画像を表示
+            self.load_image_stack(self.get_selected_item_filename())
+        #サウンドの再生は処理後にしないと、画像の更新と音にずれがでる
+        if isRemoveOK:
+            self.play_wave(self.soundFileDelete)
+
 
     # ステータス表示（通常）
     def show_statusbar_mes(self, mes):
@@ -370,7 +504,7 @@ class ThumbnailViewer(QMainWindow):
     # サウンド再生
     def play_wave(self, file_name):
         file_path = f"{self.pydir}/{file_name}"
-        if not os.path.isfile(file_path): return
+        if not os.path.exists(file_path): return
         sound = QSound(file_path)
         sound.play()
         while sound.isFinished() is False:
@@ -384,6 +518,15 @@ class ThumbnailViewer(QMainWindow):
             return 0
         horizontal_item_count = widget_width // item_width
         return max(1, horizontal_item_count)
+
+    # アイコンリスト表示の縦の行数を取得
+    def get_list_vcount(self):
+        item_height = self.list_widget.sizeHintForRow(0)
+        widget_height  = self.list_widget.height()
+        if item_height == 0:
+            return 0
+        vertical_item_count = widget_height // item_height
+        return max(1, vertical_item_count)
 
     # アイコンリストのダブルクリックイベント
     def on_item_double_clicked(self):
@@ -401,32 +544,41 @@ class ThumbnailViewer(QMainWindow):
 
     # アイコンリスト、スタック表示画像でのマウスクリック処理
     def mouse_button_clicked(self, no):
-        if no == 0:     #左クリック
-            if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
+        if no == DEF_EVENT_IMAGEORLIST:
+            if self.stack.currentIndex() == 1:
+                # 画像表示中は戻る
                 self.backToList()
             else:
+                # リストの場合は画像表示
                 self.open_image_stack(self.get_selected_item_filename())
-
-        elif no == 1:
+        elif no == DEF_EVENT_COPYDIR1:
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir1)
-        elif no == 2:
+        elif no == DEF_EVENT_COPYDIR2:
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir2)
-        elif no == 3:
+        elif no == DEF_EVENT_DELETE:    # 現在は未割当
+            self.delete_file(self.get_selected_item_filename(), self.get_selectedIndex())
+        elif no == DEF_EVENT_MOVELEFT:
             self.move_cursor(Qt.Key_Left)
             self.load_image_stack(self.get_selected_item_filename())
-        elif no == 4:
+        elif no == DEF_EVENT_MOVERIGHT:
             self.move_cursor(Qt.Key_Right)
+            self.load_image_stack(self.get_selected_item_filename())
+        elif no == DEF_EVENT_PAGEUP:
+            self.move_cursor(Qt.Key_PageUp) #表示行-1だけ上スクロール
+            self.load_image_stack(self.get_selected_item_filename())
+        elif no == DEF_EVENT_PAGEDOWN:
+            self.move_cursor(Qt.Key_PageDown) #表示行-1だけ下スクロール
             self.load_image_stack(self.get_selected_item_filename())
 
     # アイコンリストの選択項目変更イベント
     def change_selected_item(self):
-        pos = 0
-        index = self.list_widget.selectedIndexes()
-        if index and len(index) > 0:
-            pos = index[0].row()
+        pos = self.get_selectedIndex()
+        if pos == None:
+            self.filename.setText(f"")
+            return
         count = self.list_widget.count()
         countlen = len(str(count))
-        self.filename.setText(f"{self.get_selected_item_filename()} [{pos:0{countlen}}/{count}] ")
+        self.filename.setText(f"{self.get_selected_item_filename()} [{pos + 1:0{countlen}}/{count}] ")
 
     # アイコンサイズ変更時のサムネイル再作成処理
     def recreate_thmbnail(self):
@@ -462,7 +614,7 @@ class ThumbnailViewer(QMainWindow):
         #ドロップされたファイル名リストを作成する（サムネイルは後）
         for path in paths:
             if os.path.isdir(path):
-                # フォルダ内の画像を取得
+                # フォルダの場合
                 for file_name in os.listdir(path):
                     #file_path = os.path.join(path, file_name)
                     file_path = f"{path}/{file_name}"
@@ -470,23 +622,34 @@ class ThumbnailViewer(QMainWindow):
                         self.add_placeholder(file_path)
                         self.file_paths.append(file_path)
             elif self.is_image(path):
-                # 単一画像の場合
+                # ファイルの場合
                 self.add_placeholder(path)
                 self.file_paths.append(path)
         #ドロップ数とサムネイル作成済み枚数の表示
         self.show_thumbnail_info()
-        #ファイルだけがドロップされた場合、そのファイルまでスクロール＆選択状態にする
+        #1ファイルだけがドロップされた場合、そのファイルまでスクロール＆選択状態にする
         if dropOneFile != "":
+            """
+            #メモ代わりに一か所だけ古い処理を残しておく
             for index in range(self.list_widget.count()):
                 item = self.list_widget.item(index)
                 if item.data(Qt.UserRole) == dropOneFile:
                     self.list_widget.setCurrentItem(item)
                     break
+            """
+            #高速なnextでのサーチに変更
+            item = next((item for i in range(self.list_widget.count())
+                    if (item := self.list_widget.item(i)).data(Qt.UserRole) == dropOneFile), None)
+            if item:
+                self.list_widget.setCurrentItem(item)
+        else:
+            #1ファイルだけのドロップではない場合は先頭を選択状態にする
+            self.list_widget.setCurrentRow(0)
 
-        rect = self.list_widget.visualItemRect(self.list_widget.item(0))
         #横のマージンを減らしたい場合は有効にしても良い
         #縦のマージンは詰めるとアイコン下のラベルの2行表示が欠けてしまう
         """
+        rect = self.list_widget.visualItemRect(self.list_widget.item(0))
         height = rect.height()
         defmargin = rect.width() - self.thmbsize
         margin = defmargin // 2
@@ -513,7 +676,8 @@ class ThumbnailViewer(QMainWindow):
         short_name = self.truncate_filename(file_name)
         item = QListWidgetItem(f"{short_name}\nLoading...")
         item.setIcon(QIcon(gray_pixmap))
-        item.setData(Qt.UserRole, image_path)
+        item.setData(Qt.UserRole, image_path)           # ファイル名フルパス
+        item.setData(Qt.UserRole + 1, (False, False))    # バッジ1、2のオンオフ
         self.list_widget.addItem(item)
 
     # サムネイル作成サブスレッド開始
@@ -533,28 +697,46 @@ class ThumbnailViewer(QMainWindow):
             self.subthread.wait()
 
     # サブスレッドからの進捗状況イベント
-    def on_progress(self, progress, file_path, pixmap, original_size):
-        for index in range(self.list_widget.count()):
-            item = self.list_widget.item(index)
-            if item.data(Qt.UserRole) == file_path:
-                # サムネイルと元画像サイズを更新
-                file_name = os.path.basename(file_path)
-                short_name = self.truncate_filename(file_name)
-                if pixmap:
-                    item.setIcon(QIcon(pixmap))
-                    item.setText(f"{short_name}\n{original_size}")
-                else:
-                    item.setText(f"{short_name}\ndecode error.")
-                #ドロップ数とサムネイル作成済み枚数の表示
-                self.thumbnailnum = self.thumbnailnum + 1
-                self.show_thumbnail_info()
-                break
+    def on_progress(self, progress, file_path, icon, original_size):
+        item = next((item for i in range(self.list_widget.count())
+                if (item := self.list_widget.item(i)).data(Qt.UserRole) == file_path), None)
+        if item:
+            # サムネイルと元画像サイズを更新
+            file_name = os.path.basename(file_path)
+            short_name = self.truncate_filename(file_name)
+            if icon:
+                item.setIcon(icon)
+                item.setText(f"{short_name}\n{original_size}")
+            else:
+                item.setText(f"{short_name}\ndecode error.")
+
+            #これをONにすると初回のサムネイル表示完了までにかなり時間がかかるようになる
+            if DEF_CHECK_BADGE_IS_ON:
+                #ファイルのコピー先ディレクトリにファイルが存在するかをバッジ表示
+                self.set_iconBadge(item, file_name)
+
+            #ドロップ数とサムネイル作成済み枚数の表示
+            self.thumbnailnum = self.thumbnailnum + 1
+            self.show_thumbnail_info()
 
     # サブスレッドの処理完了イベント
     def on_finished(self, strsubth):
         pvsubfunc.dbgprint(f"  ==end {strsubth}")
         self.subthread = None
         self.set_status_createthumb(False)   #サムネイル作成完了
+
+    # コピー先ディレクトリに指定ファイルが存在するかをチェックしてバッジ情報を更新する
+    def set_iconBadge(self, item, file):
+        if item == None: return
+        isExistDir1, isExistDir2 = self.file_exist_check(file)
+        item.setData(Qt.UserRole + 1, (isExistDir2, isExistDir1))
+
+    # Dir1、Dir2にファイルが存在するかチェックする
+    def file_exist_check(self, file):
+        #memo:ファイルチェックos.path.isfileだとかなり遅いので、os.path.existsに変える
+        isDir1 = os.path.exists(f"{self.imageFileCopyDir1}/{file}")
+        isDir2 = os.path.exists(f"{self.imageFileCopyDir2}/{file}")
+        return isDir1, isDir2
 
     # 画像ファイルかチェック（拡張子のみ）
     def is_image(self, file_path):
@@ -590,6 +772,9 @@ class ThumbnailViewer(QMainWindow):
         self.soundFileCansel = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_F_CANSEL)
         if not self.soundFileCansel or self.soundFileCansel == "":
             self.soundFileCansel = "PromptViewer_filecansel.wav"
+        self.soundFileDelete = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_F_DELETE)
+        if not self.soundFileDelete or self.soundFileDelete == "":
+            self.soundFileDelete = "PromptViewer_filedelete.wav"
         self.imageFileCopyDir1 = pvsubfunc.read_value_from_config(SETTINGS_FILE, IMAGE_FCOPY_DIR1)
         if not self.imageFileCopyDir1 or self.imageFileCopyDir1 == "":
             self.imageFileCopyDir1 = DEF_FCOPY_DIR1
@@ -607,6 +792,7 @@ class ThumbnailViewer(QMainWindow):
         pvsubfunc.write_value_to_config(SETTINGS_FILE, SOUND_BEEP, self.soundBeep)
         pvsubfunc.write_value_to_config(SETTINGS_FILE, SOUND_FCOPY_OK, self.soundFileCopyOK)
         pvsubfunc.write_value_to_config(SETTINGS_FILE, SOUND_F_CANSEL, self.soundFileCansel)
+        pvsubfunc.write_value_to_config(SETTINGS_FILE, SOUND_F_DELETE, self.soundFileDelete)
         pvsubfunc.write_value_to_config(SETTINGS_FILE, IMAGE_FCOPY_DIR1, self.imageFileCopyDir1)
         pvsubfunc.write_value_to_config(SETTINGS_FILE, IMAGE_FCOPY_DIR2, self.imageFileCopyDir2)
 
@@ -619,19 +805,26 @@ class CustomLabel(QLabel):
         super().__init__()
     # マウスボタン押下イベント
     def mousePressEvent(self, event: QMouseEvent):
-        if event.button() == Qt.LeftButton:
-            self.mouse_notification(0)  #左クリック
-        elif event.button() == Qt.RightButton:
-            self.mouse_notification(1)  #右クリック
-        elif event.button() == Qt.MiddleButton:
-            self.mouse_notification(2)  #ミドルクリック
+        if event.button() == Qt.LeftButton:     #左クリック
+            self.mouse_notification(DEF_EVENT_IMAGEORLIST)
+        elif event.button() == Qt.RightButton:  #右クリック
+            self.mouse_notification(DEF_EVENT_COPYDIR1)
+        elif event.button() == Qt.MiddleButton: #ミドルクリック
+            self.mouse_notification(DEF_EVENT_COPYDIR2)
+        """
+        #サイドボタンでDelete処理などを実現する場合はここで
+        elif event.button() == Qt.XButton1:     #サイドボタン1
+            self.mouse_notification(DEF_EVENT_DELETE)
+        elif event.button() == Qt.XButton2:     #サイドボタン2
+            self.mouse_notification(DEF_EVENT_DELETE)
+        """
     # マウスホイールイベント
     def wheelEvent(self, event: QWheelEvent):
         delta = event.angleDelta().y()
         if delta > 0:
-            self.mouse_notification(3)  #上スクロール
+            self.mouse_notification(DEF_EVENT_MOVELEFT)  #前の画像へ
         else:
-            self.mouse_notification(4)  #下スクロール
+            self.mouse_notification(DEF_EVENT_MOVERIGHT)  #次の画像へ
     # 上位へのイベント通知
     def mouse_notification(self, no):
         self.labelMouseEvent.emit(no)
@@ -645,13 +838,27 @@ class CustomListWidget(QListWidget):
         super().__init__()
     # マウスボタン押下イベント
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.click_notification(event.pos(), 0)  #左クリック
-        elif event.button() == Qt.RightButton:
-            self.click_notification(event.pos(), 1)  #右クリック
-        elif event.button() == Qt.MiddleButton:
-            self.click_notification(event.pos(), 2)  #ミドルクリック
+        if event.button() == Qt.LeftButton:     #左クリック
+            self.click_notification(event.pos(), DEF_EVENT_IMAGEORLIST)
+        elif event.button() == Qt.RightButton:  #右クリック
+            self.click_notification(event.pos(), DEF_EVENT_COPYDIR1)
+        elif event.button() == Qt.MiddleButton: #ミドルクリック
+            self.click_notification(event.pos(), DEF_EVENT_COPYDIR2)
+        """
+        #サイドボタンでDelete処理などを実現する場合はここを編集
+        elif event.button() == Qt.XButton1:     #サイドボタン1
+            self.click_notification(event.pos(), DEF_EVENT_DELETE)
+        elif event.button() == Qt.XButton2:     #サイドボタン2
+            self.click_notification(event.pos(), DEF_EVENT_DELETE)
+        """
         super().mousePressEvent(event)
+    # マウスホイールイベント
+    def wheelEvent(self, event: QWheelEvent):
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.itemClicked.emit(DEF_EVENT_PAGEUP)   #上にスクロール
+        else:
+            self.itemClicked.emit(DEF_EVENT_PAGEDOWN)   #下にスクロール
     # 上位へのイベント通知
     def click_notification(self, pos, no):
         item = self.itemAt(pos)
@@ -661,9 +868,9 @@ class CustomListWidget(QListWidget):
             self.itemClicked.emit(no)
 
 #----------------------------------------
-# サムネイル作成用のサブスレッド
+# サムネイル作成用のサブスレッドクラス
 class SubThread(QThread):
-    progress = pyqtSignal(int, str, QPixmap, str)
+    progress = pyqtSignal(int, str, QIcon, str)
     finished_signal = pyqtSignal(str)
 
     def __init__(self, file_paths, tsize):
@@ -671,6 +878,14 @@ class SubThread(QThread):
         self.file_paths = file_paths
         self._is_running = False
         self.tsize = tsize
+        self.ostype = -1
+        system_name = platform.system()
+        if system_name == "Windows":
+            self.ostype = 0
+        elif system_name in ["Linux", "Darwin"]:  # Darwin は macOS
+            self.ostype = 1
+
+
     # メインループ
     # このループをマルチスレッドで処理しても結局アイコンの反映でUIが重くなってしまう
     # サブスレッドでアイコンデータを抱えて、何十個かまとめてからメインスレッドに通知しても結局アイコンデータのやり取りであまり早くならない
@@ -681,12 +896,13 @@ class SubThread(QThread):
             if not self._is_running:
                 pvsubfunc.dbgprint(f"       stop ack {self}")
                 break
-            #time.sleep(0.001) #最小のウェイト（入れると遅くなるけどUIは重くならない）
+            #最小のウェイト（入れると遅くなるけどUIは重くならない）
+            self.sleep_microseconds(1)
             pixmap, width, height = self.create_thumbnail(file_path)
             original_size = ""
             if pixmap:
                 original_size = self.get_imagesize_str(width,height)
-            self.progress.emit(i + 1,file_path, pixmap, original_size)
+            self.progress.emit(i + 1,file_path, QIcon(pixmap), original_size)
 
         self.finished_signal.emit(str(self))
         self._is_running = False
@@ -716,6 +932,56 @@ class SubThread(QThread):
     # イメージサイズ文字列作成
     def get_imagesize_str(self, width, height):
         return f"{width} x {height}"
+
+    # ミリ秒msec指定のスリープ関数
+    def sleep_microseconds(self, milliseconds):
+        system_name = platform.system()
+        if self.ostype == 0:    #Windows
+            ctypes.windll.kernel32.Sleep(milliseconds)
+        elif self.ostype == 1: #Linux, macOS
+            libc = ctypes.CDLL("libc.so.6" if system_name == "Linux" else "libSystem.dylib")
+            libc.usleep(milliseconds * 1000)
+        else:
+            # 保険処理（これは1ms指定のはずなのに、普通に10ms以上かかったりするぼんくらタイマ）
+            time.sleep(0.001)
+
+#----------------------------------------
+# バッジ表示用カスタムデリゲートクラス
+class BadgeDelegate(QStyledItemDelegate):
+    def __init__(self, parent = None):
+        super().__init__(parent)
+        # アイコンのバッジ
+        self.icon_badge1 = None
+        if os.path.exists(DEF_BADGE_ICON1):
+            self.icon_badge1 = QPixmap(DEF_BADGE_ICON1)
+        self.icon_badge2 = None
+        if os.path.exists(DEF_BADGE_ICON2):
+            self.icon_badge2 = QPixmap(DEF_BADGE_ICON2)
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+
+        isBdg_Left, isBdg_right = index.data(Qt.UserRole + 1) or (False, False)
+
+        icon_rect = option.rect
+        icon_width = icon_rect.width()
+        badge_size = icon_width // 4     #バッジサイズはアイコンの1/4
+        badge_margin = 2
+        badge_left = QRect(icon_rect.x() + badge_margin,
+                            icon_rect.y() + badge_margin,
+                            badge_size, badge_size)
+        y_offset = icon_rect.y() + badge_margin
+
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        if isBdg_right:
+            x_offset = icon_rect.x() + icon_width - badge_size - badge_margin
+            scaled_pixmap = self.icon_badge1.scaled(badge_size, badge_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            painter.drawPixmap(x_offset, y_offset, scaled_pixmap)
+        if isBdg_Left:
+            x_offset = icon_rect.x() + badge_margin
+            scaled_pixmap = self.icon_badge2.scaled(badge_size, badge_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            painter.drawPixmap(x_offset, y_offset, scaled_pixmap)
 
 #----------------------------------------
 # メイン
