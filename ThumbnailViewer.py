@@ -62,7 +62,7 @@ KEYS_END = [Qt.Key_Escape, Qt.Key_Comma]
 
 pvsubfunc._IS_DEBUG = 0 #デバッグログを出すなら1に
 DEF_THUMBNAIL_SIZE = 256
-DEF_THUMBNAIL_STEP = 16
+DEF_THUMBNAIL_STEP = 64
 DEF_FILENAME_TOP_LEN = 8
 DEF_FILENAME_OMIT = ".."
 DEF_FCOPY_DIR1 = "W:/_temp/ai"
@@ -475,20 +475,23 @@ class ThumbnailViewer(QMainWindow):
             except Exception as e:
                 self.show_statusbar_error(f"error : delete [{file}]")
 
-        #画像表示中に削除された場合、リストに戻るか画像を更新
-        if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
-            if self.list_widget.count() == 0:
-                #表示する画像がないので空リストに戻るしかない
-                self.backToList()
+        if self.list_widget.count() == 0:
+            #表示する画像がないので空リストに戻るしかない
+            self.backToList()
+        else:
+            if pos < self.list_widget.count() - 1:
+                #まだ先のrowが存在するので元々の次の画像に移動
+                self.list_widget.setCurrentRow(pos)
             else:
-                if pos < self.list_widget.count() - 1:
-                    #まだ先のrowが存在するので元々の次の画像に移動
-                    self.list_widget.setCurrentRow(pos)
-                else:
-                    #最終画像なので元々の前の画像に移動
-                    self.list_widget.setCurrentRow(self.list_widget.count() - 1)
-            #新しい画像を表示
+                #最終画像なので元々の前の画像に移動
+                self.list_widget.setCurrentRow(self.list_widget.count() - 1)
+
+        #画像表示中であれば新しい画像を表示
+        if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
             self.load_image_stack(self.get_selected_item_filename())
+
+        #右下のステータスを更新
+        self.change_selected_item()
         #サウンドの再生は処理後にしないと、画像の更新と音にずれがでる
         if isRemoveOK:
             self.play_wave(self.soundFileDelete)

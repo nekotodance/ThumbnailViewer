@@ -1,7 +1,7 @@
 #---- アプリごとに固有の部分 ----
 $appdispname = "Thumbnail Viewer"
 $appfilename = "ThumbnailViewer"
-#$iconfilename = "res\" + $appfilename + ".ico"
+$iconfilename = "res\" + $appfilename + ".ico"
 $pythonlibs = @("PyQt5", "Pillow", "send2trash")
 #---- アプリごとに固有の部分 ----
 
