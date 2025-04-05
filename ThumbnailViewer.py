@@ -267,8 +267,7 @@ class ThumbnailViewer(QMainWindow):
             if keyid in KEYS_DISPIMG:
                 self.open_image_stack(self.get_selected_item_filename())
             #キーの消費（eventFilter専用）
-            if keyid in [KEYS_CURSOR_ALL, KEYS_COPY1, KEYS_COPY2,
-                         KEYS_END, KEYS_DISPIMG, KEYS_DELETE, KEYS_APP]:
+            if keyid in KEYS_CURSOR_ALL + KEYS_COPY1 + KEYS_COPY2 + KEYS_END + KEYS_DISPIMG + KEYS_DELETE + KEYS_APP:
                 return True  # イベントをここで処理したとみなして消費
         return super().eventFilter(obj, event)
 
@@ -285,8 +284,7 @@ class ThumbnailViewer(QMainWindow):
             #裏のアイコンリストでカーソル移動と共に画像を更新
             self.load_image_stack(self.get_selected_item_filename())
         #有効キー以外で画像表示を閉じてアイコンリストに戻る
-        if keyid not in [KEYS_CURSOR_ALL, KEYS_COPY1, KEYS_COPY2,
-                         KEYS_END, KEYS_DELETE, KEYS_APP]:
+        if keyid not in KEYS_CURSOR_ALL + KEYS_COPY1 + KEYS_COPY2 + KEYS_END + KEYS_DELETE + KEYS_APP:
             if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
                 self.backToList()
         super().keyPressEvent(event)
