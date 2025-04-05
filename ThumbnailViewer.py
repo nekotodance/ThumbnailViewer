@@ -1,13 +1,11 @@
-import sys
-import os
-import shutil
-import time
-import platform
-import ctypes
+import sys, os, time, platform, shutil, ctypes, subprocess
+import pvsubfunc
+from send2trash import send2trash
+
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QStatusBar, QMainWindow, QLabel, QStackedWidget, QPushButton, QLineEdit, QSpinBox,
-    QStyledItemDelegate
+    QStyledItemDelegate, QAbstractItemView
 )
 from PyQt5.QtGui import (
     QPixmap, QPainter, QColor, QIcon, QPalette, QMouseEvent, QWheelEvent,
@@ -17,8 +15,6 @@ from PyQt5.QtCore import (
     Qt, QRunnable, QThreadPool, QThread, pyqtSignal, QEvent, QSize, QRect
 )
 from PyQt5.QtMultimedia import QSound
-import pvsubfunc
-from send2trash import send2trash
 
 #========================================
 # 「初回のファイルコピー状態表示バッジ機能のON/OFF」
@@ -58,7 +54,8 @@ KEYS_DELETE = [Qt.Key_H, Qt.Key_Delete]
 KEYS_DISPIMG = [Qt.Key_F, Qt.Key_Enter, Qt.Key_Return]
 # 終了
 KEYS_END = [Qt.Key_Escape, Qt.Key_Comma]
-
+# 外部アプリにて画像を開く
+KEYS_APP = [Qt.Key_R, Qt.Key_P]
 
 pvsubfunc._IS_DEBUG = 0 #デバッグログを出すなら1に
 DEF_THUMBNAIL_SIZE = 256
@@ -69,6 +66,14 @@ DEF_FCOPY_DIR1 = "W:/_temp/ai"
 DEF_FCOPY_DIR2 = "W:/_temp/ai2"
 DEF_BADGE_ICON1 = "TV_badge1_128.png"
 DEF_BADGE_ICON2 = "TV_badge2_128.png"
+#特定のアプリを起動する場合
+#DEF_START_APP = "C:/Program Files/Honeyview/Honeyview.exe"
+#DEF_START_PYFILE = ""
+#DEF_START_WORKDIR = ""
+#venvありのPythonファイルを起動する場合の指定方法
+DEF_START_EXE_APP = "C:/tool/git/PromptViewer/venv/Scripts/pythonw.exe"
+DEF_START_EXE_PYFILE = "C:/tool/git/PromptViewer/PromptViewer.py"
+DEF_START_EXE_WORKDIR = "C:/tool/git/PromptViewer"
 
 DEF_EVENT_IMAGEORLIST = 0
 DEF_EVENT_COPYDIR1 = 1
@@ -95,6 +100,9 @@ SOUND_F_CANSEL = "sound-f-cansel"
 SOUND_F_DELETE = "sound-f-delete"
 IMAGE_FCOPY_DIR1 = "image-fcopy-dir1"
 IMAGE_FCOPY_DIR2 = "image-fcopy-dir2"
+START_EXE_APP_NAME = "start-exe-app-name"
+START_EXE_PYTHON_NAME = "start-exe-python-name"
+START_EXE_WORK_DIR = "start-exe-work-dir"
 APP_WIDTH = 800
 APP_HEIGHT = 480
 
@@ -146,6 +154,9 @@ class ThumbnailViewer(QMainWindow):
         self.soundFileDelete = "PromptViewer_filedelete.wav"
         self.imageFileCopyDir1 = DEF_FCOPY_DIR1
         self.imageFileCopyDir2 = DEF_FCOPY_DIR2
+        self.startExeAppName = DEF_START_EXE_APP
+        self.startExePythonName = DEF_START_EXE_PYFILE
+        self.startExeWorkDir = DEF_START_EXE_WORKDIR
         self.thmbsize = DEF_THUMBNAIL_SIZE
 
         # 設定ファイルがあれば読み込み
@@ -162,6 +173,9 @@ class ThumbnailViewer(QMainWindow):
         self.list_widget.installEventFilter(self)
         self.list_widget.setDragEnabled(False)
         self.list_widget.setItemDelegate(BadgeDelegate())
+        # スクロールバーでのスクロールを項目単位ではなく滑らかに
+        self.list_widget.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+
         # スタック表示画像
         self.image_label.setAlignment(Qt.AlignCenter)
         # ステータスバーのアイコンサイズ設定関連
@@ -253,7 +267,8 @@ class ThumbnailViewer(QMainWindow):
             if keyid in KEYS_DISPIMG:
                 self.open_image_stack(self.get_selected_item_filename())
             #キーの消費（eventFilter専用）
-            if keyid in KEYS_CURSOR_ALL + KEYS_COPY1 + KEYS_COPY2 + KEYS_END + KEYS_DISPIMG + KEYS_DELETE:
+            if keyid in [KEYS_CURSOR_ALL, KEYS_COPY1, KEYS_COPY2,
+                         KEYS_END, KEYS_DISPIMG, KEYS_DELETE, KEYS_APP]:
                 return True  # イベントをここで処理したとみなして消費
         return super().eventFilter(obj, event)
 
@@ -270,7 +285,8 @@ class ThumbnailViewer(QMainWindow):
             #裏のアイコンリストでカーソル移動と共に画像を更新
             self.load_image_stack(self.get_selected_item_filename())
         #有効キー以外で画像表示を閉じてアイコンリストに戻る
-        if keyid not in KEYS_CURSOR_ALL + KEYS_COPY1 + KEYS_COPY2 + KEYS_END + KEYS_DELETE:
+        if keyid not in [KEYS_CURSOR_ALL, KEYS_COPY1, KEYS_COPY2,
+                         KEYS_END, KEYS_DELETE, KEYS_APP]:
             if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
                 self.backToList()
         super().keyPressEvent(event)
@@ -300,6 +316,9 @@ class ThumbnailViewer(QMainWindow):
         #デリート処理
         if keyid in KEYS_DELETE:
             self.delete_file(self.get_selected_item_filename(), self.get_selectedIndex())
+        #アプリ起動
+        if keyid in KEYS_APP:
+            self.start_app_file(self.get_selected_item_filename())
         #終了
         if keyid in KEYS_END:
             self.close()
@@ -310,7 +329,7 @@ class ThumbnailViewer(QMainWindow):
         count = self.list_widget.count()
         pos = self.get_selectedIndex()
         hnum = self.get_list_hcount()
-        vnum = max(1, self.get_list_vcount() - 1)   #表示行-1分スクロール
+        vnum = max(1, self.get_list_vcount() - 1)   #表示行-1行分スクロール
         scrollnum = (hnum * vnum)   #横の項目数 * 行数で移動項目数
         if pos != None:
             posnew = pos
@@ -408,6 +427,9 @@ class ThumbnailViewer(QMainWindow):
 
     # ファイルのコピー処理
     def copy_file(self, file_path, destdir):
+        #コピー先ディレクトリを空にしていた場合は何もしない
+        if not destdir: return
+
         isCopyOK = -1
         mes = ""
         if not os.path.exists(file_path):
@@ -496,6 +518,20 @@ class ThumbnailViewer(QMainWindow):
         if isRemoveOK:
             self.play_wave(self.soundFileDelete)
 
+    # 選択ファイルを外部アプリで開く
+    def start_app_file(self, file):
+        #未指定の場合はなにもしない
+        if not self.startExeAppName: return
+
+        #設定状況にあわせて外部アプリを起動
+        if self.startExePythonName and self.startExeWorkDir:
+            subprocess.Popen([self.startExeAppName, self.startExePythonName, file], cwd=self.startExeWorkDir)
+        elif self.startExeWorkDir:
+            subprocess.Popen([self.startExeAppName, file], cwd=self.startExeWorkDir)
+        elif self.startExePythonName:
+            subprocess.Popen([self.startExeAppName, self.startExePythonName, file])
+        else:
+            subprocess.Popen([self.startExeAppName, file])
 
     # ステータス表示（通常）
     def show_statusbar_mes(self, mes):
@@ -508,6 +544,9 @@ class ThumbnailViewer(QMainWindow):
 
     # サウンド再生
     def play_wave(self, file_name):
+        #空指定の場合には何もしない
+        if not file_name: return
+
         file_path = f"{self.pydir}/{file_name}"
         if not os.path.exists(file_path): return
         sound = QSound(file_path)
@@ -569,10 +608,14 @@ class ThumbnailViewer(QMainWindow):
             self.move_cursor(Qt.Key_Right)
             self.load_image_stack(self.get_selected_item_filename())
         elif no == DEF_EVENT_PAGEUP:
-            self.move_cursor(Qt.Key_PageUp) #表示行-1だけ上スクロール
+            #ちょっと早すぎて使いにくいのでホイール操作は上下キーと同様に1行分だけに
+            #self.move_cursor(Qt.Key_PageUp)
+            self.move_cursor(Qt.Key_Up)
             self.load_image_stack(self.get_selected_item_filename())
         elif no == DEF_EVENT_PAGEDOWN:
-            self.move_cursor(Qt.Key_PageDown) #表示行-1だけ下スクロール
+            #ちょっと早すぎて使いにくいのでホイール操作は上下キーと同様に1行分だけに
+            #self.move_cursor(Qt.Key_PageDown)
+            self.move_cursor(Qt.Key_Down)
             self.load_image_stack(self.get_selected_item_filename())
 
     # アイコンリストの選択項目変更イベント
@@ -768,24 +811,34 @@ class ThumbnailViewer(QMainWindow):
         if val: self.thmbsize = val
         else: self.thmbsize = DEF_THUMBNAIL_SIZE
 
+        #空白""を指定で処理をスキップするように修正
         self.soundBeep = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_BEEP)
-        if not self.soundBeep or self.soundBeep == "":
+        if self.soundBeep == None:
             self.soundBeep = "PromptViewer_beep.wav"
         self.soundFileCopyOK = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_FCOPY_OK)
-        if not self.soundFileCopyOK or self.soundFileCopyOK == "":
+        if self.soundFileCopyOK == None:
             self.soundFileCopyOK = "PromptViewer_filecopyok.wav"
         self.soundFileCansel = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_F_CANSEL)
-        if not self.soundFileCansel or self.soundFileCansel == "":
+        if self.soundFileCansel == None:
             self.soundFileCansel = "PromptViewer_filecansel.wav"
         self.soundFileDelete = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_F_DELETE)
-        if not self.soundFileDelete or self.soundFileDelete == "":
+        if self.soundFileDelete == None:
             self.soundFileDelete = "PromptViewer_filedelete.wav"
         self.imageFileCopyDir1 = pvsubfunc.read_value_from_config(SETTINGS_FILE, IMAGE_FCOPY_DIR1)
-        if not self.imageFileCopyDir1 or self.imageFileCopyDir1 == "":
+        if self.imageFileCopyDir1 == None:
             self.imageFileCopyDir1 = DEF_FCOPY_DIR1
         self.imageFileCopyDir2 = pvsubfunc.read_value_from_config(SETTINGS_FILE, IMAGE_FCOPY_DIR2)
-        if not self.imageFileCopyDir2 or self.imageFileCopyDir2 == "":
+        if self.imageFileCopyDir2 == None:
             self.imageFileCopyDir2 = DEF_FCOPY_DIR2
+        self.startExeAppName = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_APP_NAME)
+        if self.startExeAppName == None:
+            self.startExeAppName = DEF_START_EXE_APP
+        self.startExePythonName = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_PYTHON_NAME)
+        if self.startExePythonName == None:
+            self.startExePythonName = DEF_START_EXE_PYFILE
+        self.startExeWorkDir = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_WORK_DIR)
+        if self.startExeWorkDir == None:
+            self.startExeWorkDir = DEF_START_EXE_PYFILE
 
     # 設定ファイルのセーブ
     def save_settings(self):
@@ -800,6 +853,9 @@ class ThumbnailViewer(QMainWindow):
         pvsubfunc.write_value_to_config(SETTINGS_FILE, SOUND_F_DELETE, self.soundFileDelete)
         pvsubfunc.write_value_to_config(SETTINGS_FILE, IMAGE_FCOPY_DIR1, self.imageFileCopyDir1)
         pvsubfunc.write_value_to_config(SETTINGS_FILE, IMAGE_FCOPY_DIR2, self.imageFileCopyDir2)
+        pvsubfunc.write_value_to_config(SETTINGS_FILE, START_EXE_APP_NAME, self.startExeAppName)
+        pvsubfunc.write_value_to_config(SETTINGS_FILE, START_EXE_PYTHON_NAME, self.startExePythonName)
+        pvsubfunc.write_value_to_config(SETTINGS_FILE, START_EXE_WORK_DIR, self.startExeWorkDir)
 
 #----------------------------------------
 # 画像のスタック表示用カスタムラベルクラス
