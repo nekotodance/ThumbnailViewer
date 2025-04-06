@@ -1,7 +1,8 @@
-import json
-import datetime
+import json, datetime, os
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
+from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+from PyQt5.QtCore import QUrl
 
 #デバッグ用のコードの有効無効切り替え 0:無効、1:有効
 _IS_DEBUG = 0
@@ -56,7 +57,6 @@ def normalize_newlines(text, newline="\n"):
     normalized_text = normalized_text.replace("\n", newline)
     # 必要に応じて統一改行文字に置き換える
     return normalized_text
-
 """
 # 使用例
 input_text = "Hello\r\nWorld!\rThis is a test.\nNewline normalization."
@@ -123,7 +123,6 @@ def add_around_all(text, target, prefix, suffix):
         start_index = index + len(target)
 
     return result
-
 """
 # 使用例
 original_text = "abcdefghijklmnopqrstu"
@@ -161,7 +160,6 @@ def extract_between(text, char_a, char_b):
         start_index = end_index + len(char_b)
 
     return results
-
 """
 # 使用例
 original_text = "Here is <tag>content1</tag> and <tag>content2</tag>."
@@ -208,3 +206,19 @@ def remove_jpg_comment_Exifbyte(str):
     resstr = resstr.replace("\\x00'","")    #ファイルの終端コード
     resstr = resstr.replace("\\\\", "\\")   #jpg変換時の問題？
     return resstr
+
+# サウンド再生
+def play_wave(file_path):
+    #空指定の場合には何もしない
+    if not file_path: return
+    if not os.path.exists(file_path): return
+    #QSoundだとちょっと引っ掛かりがあるのでQMediaPlayerに変更
+    player = QMediaPlayer()
+    player.setMedia(QMediaContent(QUrl.fromLocalFile(file_path)))
+    player.mediaStatusChanged.connect(lambda status: handle_media_status(status, player))
+    player.play()
+
+# 再生後の後処理
+def handle_media_status(status, player):
+    if status == QMediaPlayer.EndOfMedia:
+        player.deleteLater()

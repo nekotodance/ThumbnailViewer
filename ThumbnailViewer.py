@@ -14,7 +14,6 @@ from PyQt5.QtGui import (
 from PyQt5.QtCore import (
     Qt, QRunnable, QThreadPool, QThread, pyqtSignal, QEvent, QSize, QRect
 )
-from PyQt5.QtMultimedia import QSound
 
 #========================================
 # 「初回のファイルコピー状態表示バッジ機能のON/OFF」
@@ -23,6 +22,12 @@ from PyQt5.QtMultimedia import QSound
 #  ・多少遅くても起動時にコピー先フォルダにファイルが存在するかチェックしたい人はTrueのままで
 #========================================
 DEF_CHECK_BADGE_IS_ON = True
+
+#========================================
+# 「マウスでの画像表示をダブルクリックorシングルクリック切替」
+# 従来のシングルクリックにしたい場合はFalseを指定してください
+#========================================
+DEF_MOUSE_DOUBLECLICK_IS_ON = True
 
 #========================================
 #= 「キー割り当ての変更」
@@ -44,18 +49,22 @@ KEYS_PAGE_UP = [Qt.Key_2, Qt.Key_PageUp]
 KEYS_PAGE_DOWN = [Qt.Key_X, Qt.Key_PageDown]
 # 全カーソルキー一覧
 KEYS_CURSOR_ALL = KEYS_CURSOR_UP + KEYS_CURSOR_DOWN + KEYS_CURSOR_LEFT + KEYS_CURSOR_RIGHT + KEYS_PAGE_UP + KEYS_PAGE_DOWN
+
 # コピー1
 KEYS_COPY1 = [Qt.Key_E, Qt.Key_Slash]
 # コピー2
 KEYS_COPY2 = [Qt.Key_Q, Qt.Key_Period]
 # デリート
 KEYS_DELETE = [Qt.Key_H, Qt.Key_Delete]
-# 画像表示へ移動
-KEYS_DISPIMG = [Qt.Key_F, Qt.Key_Enter, Qt.Key_Return]
 # 終了
 KEYS_END = [Qt.Key_Escape, Qt.Key_Comma]
 # 外部アプリにて画像を開く
 KEYS_APP = [Qt.Key_R, Qt.Key_P]
+# 全機能キー一覧
+KEYS_FUNC_ALL = KEYS_COPY1 + KEYS_COPY2 + KEYS_DELETE + KEYS_END + KEYS_APP
+
+# 画像表示へ移動（このキーだけリスト表示とラベル表示で動作が変わる）
+KEYS_DISPIMG = [Qt.Key_F, Qt.Key_Enter, Qt.Key_Return]
 
 pvsubfunc._IS_DEBUG = 0 #デバッグログを出すなら1に
 DEF_THUMBNAIL_SIZE = 256
@@ -267,7 +276,7 @@ class ThumbnailViewer(QMainWindow):
             if keyid in KEYS_DISPIMG:
                 self.open_image_stack(self.get_selected_item_filename())
             #キーの消費（eventFilter専用）
-            if keyid in KEYS_CURSOR_ALL + KEYS_COPY1 + KEYS_COPY2 + KEYS_END + KEYS_DISPIMG + KEYS_DELETE + KEYS_APP:
+            if keyid in KEYS_CURSOR_ALL + KEYS_FUNC_ALL + KEYS_DISPIMG:
                 return True  # イベントをここで処理したとみなして消費
         return super().eventFilter(obj, event)
 
@@ -284,7 +293,7 @@ class ThumbnailViewer(QMainWindow):
             #裏のアイコンリストでカーソル移動と共に画像を更新
             self.load_image_stack(self.get_selected_item_filename())
         #有効キー以外で画像表示を閉じてアイコンリストに戻る
-        if keyid not in KEYS_CURSOR_ALL + KEYS_COPY1 + KEYS_COPY2 + KEYS_END + KEYS_DELETE + KEYS_APP:
+        if keyid not in KEYS_CURSOR_ALL + KEYS_FUNC_ALL:
             if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
                 self.backToList()
         super().keyPressEvent(event)
@@ -546,11 +555,15 @@ class ThumbnailViewer(QMainWindow):
         if not file_name: return
 
         file_path = f"{self.pydir}/{file_name}"
+        """
         if not os.path.exists(file_path): return
         sound = QSound(file_path)
         sound.play()
         while sound.isFinished() is False:
             app.processEvents()
+        """
+        #QSoundだとカーソル移動に違和感のあるケースがあるのでQMediaPlayerに変更
+        pvsubfunc.play_wave(file_path)
 
     # アイコンリスト表示の横の数を取得
     def get_list_hcount(self):
@@ -572,9 +585,9 @@ class ThumbnailViewer(QMainWindow):
 
     # アイコンリストのダブルクリックイベント
     def on_item_double_clicked(self):
-        #ダブルクリックからシングルクリックに変更
-        #self.open_image_stack(self.get_selected_item_filename())
-        pass
+        #ダブルクリックかシングルクリックかの機能切替対応
+        if DEF_MOUSE_DOUBLECLICK_IS_ON:
+            self.open_image_stack(self.get_selected_item_filename())
 
     # アイコンリストのクリックイベント
     def on_item_clicked(self, no):
@@ -898,7 +911,9 @@ class CustomListWidget(QListWidget):
     # マウスボタン押下イベント
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:     #左クリック
-            self.click_notification(event.pos(), DEF_EVENT_IMAGEORLIST)
+            #ダブルクリックかシングルクリックかの機能切替対応
+            if not DEF_MOUSE_DOUBLECLICK_IS_ON:
+                self.click_notification(event.pos(), DEF_EVENT_IMAGEORLIST)
         elif event.button() == Qt.RightButton:  #右クリック
             self.click_notification(event.pos(), DEF_EVENT_COPYDIR1)
         elif event.button() == Qt.MiddleButton: #ミドルクリック
