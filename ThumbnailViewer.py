@@ -75,6 +75,12 @@ DEF_FCOPY_DIR1 = "W:/_temp/ai"
 DEF_FCOPY_DIR2 = "W:/_temp/ai2"
 DEF_BADGE_ICON1 = "TV_badge1_128.png"
 DEF_BADGE_ICON2 = "TV_badge2_128.png"
+
+DEF_SOUND_BEEP = "PromptViewer_beep.wav"
+DEF_SOUND_FCOPY_OK = "PromptViewer_filecopyok.wav"
+DEF_SOUND_F_CANSEL = "PromptViewer_filecansel.wav"
+DEF_SOUND_F_DELETE = "PromptViewer_filedelete.wav"
+
 #特定のアプリを起動する場合
 #DEF_START_APP = "C:/Program Files/Honeyview/Honeyview.exe"
 #DEF_START_PYFILE = ""
@@ -157,10 +163,10 @@ class ThumbnailViewer(QMainWindow):
         self.show_statusbar_mes(f"Drag and drop image files or folders")
 
         # 変数
-        self.soundBeep = "PromptViewer_beep.wav"
-        self.soundFileCopyOK = "PromptViewer_filecopyok.wav"
-        self.soundFileCansel = "PromptViewer_filecansel.wav"
-        self.soundFileDelete = "PromptViewer_filedelete.wav"
+        self.soundBeep = DEF_SOUND_BEEP
+        self.soundFileCopyOK = DEF_SOUND_FCOPY_OK
+        self.soundFileCansel = DEF_SOUND_F_CANSEL
+        self.soundFileDelete = DEF_SOUND_F_DELETE
         self.imageFileCopyDir1 = DEF_FCOPY_DIR1
         self.imageFileCopyDir2 = DEF_FCOPY_DIR2
         self.startExeAppName = DEF_START_EXE_APP
@@ -197,7 +203,7 @@ class ThumbnailViewer(QMainWindow):
         self.buttonSet.setFixedWidth(64)
         spacer.setFixedWidth(16)
         # ウィジェットのイベント登録
-        self.list_widget.itemDoubleClicked.connect(self.on_item_double_clicked)
+        #self.list_widget.itemDoubleClicked.connect(self.on_item_double_clicked)
         self.list_widget.itemClicked.connect(self.on_item_clicked)
         self.list_widget.itemSelectionChanged.connect(self.change_selected_item)
         self.buttonSmall.clicked.connect(lambda: self.thmsizeBox.setValue(self.thmsizeBox.value() - DEF_THUMBNAIL_STEP))
@@ -583,11 +589,15 @@ class ThumbnailViewer(QMainWindow):
         vertical_item_count = widget_height // item_height
         return max(1, vertical_item_count)
 
+    # この方式だと右クリックのダブルクリックまで処理してしまってる
+    # CustomListWidgetの中でmouseDoubleClickEventをオーバーライドして処理するように変更
+    """
     # アイコンリストのダブルクリックイベント
     def on_item_double_clicked(self):
         #ダブルクリックかシングルクリックかの機能切替対応
         if DEF_MOUSE_DOUBLECLICK_IS_ON:
             self.open_image_stack(self.get_selected_item_filename())
+    """
 
     # アイコンリストのクリックイベント
     def on_item_clicked(self, no):
@@ -822,34 +832,16 @@ class ThumbnailViewer(QMainWindow):
         if val: self.thmbsize = val
         else: self.thmbsize = DEF_THUMBNAIL_SIZE
 
-        #空白""を指定で処理をスキップするように修正
-        self.soundBeep = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_BEEP)
-        if self.soundBeep == None:
-            self.soundBeep = "PromptViewer_beep.wav"
-        self.soundFileCopyOK = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_FCOPY_OK)
-        if self.soundFileCopyOK == None:
-            self.soundFileCopyOK = "PromptViewer_filecopyok.wav"
-        self.soundFileCansel = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_F_CANSEL)
-        if self.soundFileCansel == None:
-            self.soundFileCansel = "PromptViewer_filecansel.wav"
-        self.soundFileDelete = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_F_DELETE)
-        if self.soundFileDelete == None:
-            self.soundFileDelete = "PromptViewer_filedelete.wav"
-        self.imageFileCopyDir1 = pvsubfunc.read_value_from_config(SETTINGS_FILE, IMAGE_FCOPY_DIR1)
-        if self.imageFileCopyDir1 == None:
-            self.imageFileCopyDir1 = DEF_FCOPY_DIR1
-        self.imageFileCopyDir2 = pvsubfunc.read_value_from_config(SETTINGS_FILE, IMAGE_FCOPY_DIR2)
-        if self.imageFileCopyDir2 == None:
-            self.imageFileCopyDir2 = DEF_FCOPY_DIR2
-        self.startExeAppName = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_APP_NAME)
-        if self.startExeAppName == None:
-            self.startExeAppName = DEF_START_EXE_APP
-        self.startExePythonName = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_PYTHON_NAME)
-        if self.startExePythonName == None:
-            self.startExePythonName = DEF_START_EXE_PYFILE
-        self.startExeWorkDir = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_WORK_DIR)
-        if self.startExeWorkDir == None:
-            self.startExeWorkDir = DEF_START_EXE_PYFILE
+        #要素が存在しない場合の初期値指定ありの関数に置き換え
+        self.soundBeep = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_BEEP, DEF_SOUND_BEEP)
+        self.soundFileCopyOK = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_FCOPY_OK, DEF_SOUND_FCOPY_OK)
+        self.soundFileCansel = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_F_CANSEL, DEF_SOUND_F_CANSEL)
+        self.soundFileDelete = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_F_DELETE, DEF_SOUND_F_DELETE)
+        self.imageFileCopyDir1 = pvsubfunc.read_value_from_config(SETTINGS_FILE, IMAGE_FCOPY_DIR1, DEF_FCOPY_DIR1)
+        self.imageFileCopyDir2 = pvsubfunc.read_value_from_config(SETTINGS_FILE, IMAGE_FCOPY_DIR2, DEF_FCOPY_DIR2)
+        self.startExeAppName = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_APP_NAME, DEF_START_EXE_APP)
+        self.startExePythonName = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_PYTHON_NAME, DEF_START_EXE_PYFILE)
+        self.startExeWorkDir = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_WORK_DIR, DEF_START_EXE_PYFILE)
 
     # 設定ファイルのセーブ
     def save_settings(self):
@@ -926,6 +918,15 @@ class CustomListWidget(QListWidget):
             self.click_notification(event.pos(), DEF_EVENT_DELETE)
         """
         super().mousePressEvent(event)
+    # マウスダブルクリックイベント
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            #ダブルクリックかシングルクリックかの機能切替対応
+            if DEF_MOUSE_DOUBLECLICK_IS_ON:
+                self.click_notification(event.pos(), DEF_EVENT_IMAGEORLIST)
+        elif event.button() == Qt.RightButton:
+            pass    #何もしない
+        super().mouseDoubleClickEvent(event)
     # マウスホイールイベント
     def wheelEvent(self, event: QWheelEvent):
         delta = event.angleDelta().y()

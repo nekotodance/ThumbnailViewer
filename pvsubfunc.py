@@ -15,12 +15,15 @@ def dbgprint(message):
         # print message
         print(f"[{timestamp}] {message}")
 
-#json形式の設定ファイルから指定されたキーの値を読み込む
-def read_value_from_config(config_file, key):
+#json形式の設定ファイルから指定されたキーの値を読み込む（初期値指定あり）
+def read_value_from_config(config_file, key, defvalue=None):
     try:
         with open(config_file, 'r', encoding='utf-8') as f:
             config_data = json.load(f)
-        return config_data.get(key, None)
+        result = config_data.get(key, None)
+        if result == None and defvalue != None:
+            result = defvalue
+        return result
 
     except FileNotFoundError:
         print(f"エラー: 設定ファイルが見つかりません: {config_file}")
