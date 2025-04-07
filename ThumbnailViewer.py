@@ -221,6 +221,7 @@ class ThumbnailViewer(QMainWindow):
         self.pydir = os.path.dirname(os.path.abspath(__file__))
         self.isCreateThumbnail = False
         self.webpmovie = None   # 画像表示でwebpだった場合のプレイヤー
+        self.lastcheckedpos = -1    # 最後の選択項目（選択が外れた場合の処理用）
 
     # サムネイルサイズの設定
     def set_thmbnail_size(self, tsize):
@@ -340,11 +341,17 @@ class ThumbnailViewer(QMainWindow):
     # ページUp/Downは、3行表示している場合は2行分移動
     def move_cursor(self, direction):
         count = self.list_widget.count()
-        pos = self.get_selectedIndex()
+        nowpos = self.get_selectedIndex()
         hnum = self.get_list_hcount()
         vnum = max(1, self.get_list_vcount() - 1)   #表示行-1行分スクロール
         scrollnum = (hnum * vnum)   #横の項目数 * 行数で移動項目数
-        if pos != None:
+        #選択が外れた場合は前回選択中の位置から処理を継続
+        #（選択項目が外れないようにしたため選択外れとキー操作がよほどクロスしない限りこの処理は働かない）
+        pos = nowpos
+        if pos == None:
+            pos = self.lastcheckedpos
+
+        if pos >= 0: #フォルダをドロップした時点で0を選択しているので-1はあり得ないが念のためチェック
             posnew = pos
             if direction == Qt.Key_Up:
                 posnew = max(0, pos - hnum)
@@ -359,7 +366,7 @@ class ThumbnailViewer(QMainWindow):
             elif direction == Qt.Key_PageDown:
                 posnew = min(count - 1, pos + scrollnum)
 
-            if pos != posnew:
+            if pos != posnew or nowpos == None:
                 self.list_widget.setCurrentRow(posnew)
             else:
                 #self.play_wave(self.soundBeep) #鳴らすとちょっと耳障り
@@ -652,11 +659,17 @@ class ThumbnailViewer(QMainWindow):
     # アイコンリストの選択項目変更イベント
     def change_selected_item(self):
         pos = self.get_selectedIndex()
-        count = 0
+        #list_widgetはclearしてから実際に削除されるまでラグがある？のでfile_pathsでの判定に変更
+        #count = self.list_widget.count()
+        count = len(self.file_paths)
         if pos == None:
             pos = 0
+            if self.lastcheckedpos >= 0:
+                #選択が外れた場合は強引に前の選択項目をチェックされた事にする
+                pos = self.lastcheckedpos
+                self.list_widget.setCurrentRow(pos)
         else:
-            count = self.list_widget.count()
+            self.lastcheckedpos = pos   #有効な選択のみ最後の選択番号として退避
         self.show_selected_item_info(pos, count)
 
     # アイコンサイズ変更時のサムネイル再作成処理
