@@ -555,6 +555,16 @@ class ThumbnailViewer(QMainWindow):
         self.statusBar.showMessage(f"{mes}")
         self.play_wave(self.soundBeep)
 
+    # 選択ファイルの状況表示
+    def show_selected_item_info(self, pos, count):
+        if count == 0:
+            self.setWindowTitle(WINDOW_TITLE)
+            return
+        countlen = len(str(count))
+        self.setWindowTitle(f"[{pos + 1:0{countlen}}/{count}] {self.get_selected_item_filename()}")
+        #ここは結構見にくい位置なので、サムネイル作成状況とかどうでもいいものに変更
+        #self.filename.setText(f"{self.get_selected_item_filename()} [{pos + 1:0{countlen}}/{count}] ")
+
     # サウンド再生
     def play_wave(self, file_name):
         #空指定の場合には何もしない
@@ -642,12 +652,12 @@ class ThumbnailViewer(QMainWindow):
     # アイコンリストの選択項目変更イベント
     def change_selected_item(self):
         pos = self.get_selectedIndex()
+        count = 0
         if pos == None:
-            self.filename.setText(f"")
-            return
-        count = self.list_widget.count()
-        countlen = len(str(count))
-        self.filename.setText(f"{self.get_selected_item_filename()} [{pos + 1:0{countlen}}/{count}] ")
+            pos = 0
+        else:
+            count = self.list_widget.count()
+        self.show_selected_item_info(pos, count)
 
     # アイコンサイズ変更時のサムネイル再作成処理
     def recreate_thmbnail(self):
@@ -695,6 +705,7 @@ class ThumbnailViewer(QMainWindow):
                 self.add_placeholder(path)
                 self.file_paths.append(path)
         #ドロップ数とサムネイル作成済み枚数の表示
+        self.show_statusbar_mes(f"{len(self.file_paths)} file dropped.")
         self.show_thumbnail_info()
         #1ファイルだけがドロップされた場合、そのファイルまでスクロール＆選択状態にする
         if dropOneFile != "":
@@ -732,7 +743,8 @@ class ThumbnailViewer(QMainWindow):
     def show_thumbnail_info(self):
         filenum = len(self.file_paths)
         filelen = len(str(filenum))
-        self.show_statusbar_mes(f"[{self.thumbnailnum:0{filelen}}/{filenum}] file dropped.")
+        #self.show_statusbar_mes(f"[{self.thumbnailnum:0{filelen}}/{filenum}] file dropped.")
+        self.filename.setText(f"Thumbnail created [{self.thumbnailnum:0{filelen}}/{filenum}] ")
 
     # サムネイル作成前の仮画像作成
     def add_placeholder(self, image_path):
