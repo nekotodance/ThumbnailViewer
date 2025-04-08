@@ -941,7 +941,7 @@ class ThumbnailViewer(QMainWindow):
         self.imageFileCopyDir2 = pvsubfunc.read_value_from_config(SETTINGS_FILE, IMAGE_FCOPY_DIR2, DEF_FCOPY_DIR2)
         self.startExeAppName = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_APP_NAME, DEF_START_EXE_APP)
         self.startExePythonName = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_PYTHON_NAME, DEF_START_EXE_PYFILE)
-        self.startExeWorkDir = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_WORK_DIR, DEF_START_EXE_PYFILE)
+        self.startExeWorkDir = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_WORK_DIR, DEF_START_EXE_WORKDIR)
 
     # 設定ファイルのセーブ
     def save_settings(self):
