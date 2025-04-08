@@ -5,14 +5,15 @@ from send2trash import send2trash
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QStatusBar, QMainWindow, QLabel, QStackedWidget, QPushButton, QLineEdit, QSpinBox,
-    QStyledItemDelegate, QAbstractItemView
+    QStyledItemDelegate, QAbstractItemView, QMessageBox
 )
 from PyQt5.QtGui import (
     QPixmap, QPainter, QColor, QIcon, QPalette, QMouseEvent, QWheelEvent,
     QMovie, QImageReader
 )
 from PyQt5.QtCore import (
-    Qt, QRunnable, QThreadPool, QThread, pyqtSignal, QEvent, QSize, QRect
+    Qt, QRunnable, QThreadPool, QThread, pyqtSignal, QEvent, QSize, QRect,
+    QTimer
 )
 
 #========================================
@@ -47,7 +48,7 @@ KEYS_CURSOR_RIGHT = [Qt.Key_D, Qt.Key_Right]
 KEYS_PAGE_UP = [Qt.Key_2, Qt.Key_PageUp]
 # ページダウン
 KEYS_PAGE_DOWN = [Qt.Key_X, Qt.Key_PageDown]
-# 全カーソルキー一覧
+# 全カーソルキー一覧（ここに登録しておかないとeventfilterとkeypressのイベントで2回の処理される）
 KEYS_CURSOR_ALL = KEYS_CURSOR_UP + KEYS_CURSOR_DOWN + KEYS_CURSOR_LEFT + KEYS_CURSOR_RIGHT + KEYS_PAGE_UP + KEYS_PAGE_DOWN
 
 # コピー1
@@ -60,12 +61,20 @@ KEYS_DELETE = [Qt.Key_H, Qt.Key_Delete]
 KEYS_END = [Qt.Key_Escape, Qt.Key_Comma]
 # 外部アプリにて画像を開く
 KEYS_APP = [Qt.Key_R, Qt.Key_P]
-# 全機能キー一覧
-KEYS_FUNC_ALL = KEYS_COPY1 + KEYS_COPY2 + KEYS_DELETE + KEYS_END + KEYS_APP
+# 保存済みのウインドウ・アイコンサイズへ切り替え
+KEYS_OKINI_LOAD = [Qt.Key_8, Qt.Key_9, Qt.Key_0]
+# 現在のウインドウ・アイコンサイズを保存
+KEYS_OKINI_SAVE = [Qt.Key_F8, Qt.Key_F9, Qt.Key_F10]
+# 設定保存時の確認用のテキスト（お気に入り画面サイズのキーを変更する場合にはここもあわせて）
+KEYS_OKINI_NAME = ["Key_8", "Key_9", "Key_0"]
+# 全機能キー一覧（ここに登録しておかないとeventfilterとkeypressのイベントで2回の処理される）
+KEYS_FUNC_ALL = KEYS_COPY1 + KEYS_COPY2 + KEYS_DELETE + KEYS_END + KEYS_APP + KEYS_OKINI_LOAD + KEYS_OKINI_SAVE
 
 # 画像表示へ移動（このキーだけリスト表示とラベル表示で動作が変わる）
 KEYS_DISPIMG = [Qt.Key_F, Qt.Key_Enter, Qt.Key_Return]
 
+#----------------------------------------
+# 定義（初期値など）
 pvsubfunc._IS_DEBUG = 0 #デバッグログを出すなら1に
 DEF_THUMBNAIL_SIZE = 256
 DEF_THUMBNAIL_STEP = 64
@@ -75,11 +84,15 @@ DEF_FCOPY_DIR1 = "W:/_temp/ai"
 DEF_FCOPY_DIR2 = "W:/_temp/ai2"
 DEF_BADGE_ICON1 = "TV_badge1_128.png"
 DEF_BADGE_ICON2 = "TV_badge2_128.png"
-
 DEF_SOUND_BEEP = "PromptViewer_beep.wav"
 DEF_SOUND_FCOPY_OK = "PromptViewer_filecopyok.wav"
 DEF_SOUND_F_CANSEL = "PromptViewer_filecansel.wav"
 DEF_SOUND_F_DELETE = "PromptViewer_filedelete.wav"
+DEF_DIC_OKINI = {#iconsize,width,height,iconsize
+    str(Qt.Key_8): [128, 1366, 892],     #128dotで10列5行
+    str(Qt.Key_9): [256, 1860, 934],     #256dotで7列3行
+    str(Qt.Key_0): [320, 1656, 1126]     #320dotで5列3行
+}
 
 #特定のアプリを起動する場合
 #DEF_START_APP = "C:/Program Files/Honeyview/Honeyview.exe"
@@ -98,12 +111,15 @@ DEF_EVENT_MOVELEFT = 10
 DEF_EVENT_MOVERIGHT = 11
 DEF_EVENT_PAGEUP = 12
 DEF_EVENT_PAGEDOWN = 13
-
 DEF_SUPPORT_IMAGE = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp")
 DEF_SUPPORT_MOVIE = (".gif", ".webp")
-
 WINDOW_TITLE = "Thumbnail Viewer"
 SETTINGS_FILE = "ThumbnailViewer_settings.json"
+APP_WIDTH = 800
+APP_HEIGHT = 480
+
+#----------------------------------------
+# 設定ファイルのキー名
 GEOMETRY_X = "geometry-x"
 GEOMETRY_Y = "geometry-y"
 GEOMETRY_W = "geometry-w"
@@ -118,8 +134,7 @@ IMAGE_FCOPY_DIR2 = "image-fcopy-dir2"
 START_EXE_APP_NAME = "start-exe-app-name"
 START_EXE_PYTHON_NAME = "start-exe-python-name"
 START_EXE_WORK_DIR = "start-exe-work-dir"
-APP_WIDTH = 800
-APP_HEIGHT = 480
+DIC_OKINI_SIZE = "dic-okini-size"
 
 #----------------------------------------
 # サムネイルビューアクラス
@@ -173,6 +188,7 @@ class ThumbnailViewer(QMainWindow):
         self.startExePythonName = DEF_START_EXE_PYFILE
         self.startExeWorkDir = DEF_START_EXE_WORKDIR
         self.thmbsize = DEF_THUMBNAIL_SIZE
+        self.dic_okinisize = DEF_DIC_OKINI
 
         # 設定ファイルがあれば読み込み
         if os.path.exists(SETTINGS_FILE):
@@ -252,6 +268,7 @@ class ThumbnailViewer(QMainWindow):
         if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
             self.backToList()
 
+        self.lastcheckedpos = -1
         urls = event.mimeData().urls()
         file_paths = [url.toLocalFile() for url in urls]
         self.create_thumbnails(file_paths)
@@ -322,20 +339,54 @@ class ThumbnailViewer(QMainWindow):
             elif keyid in KEYS_PAGE_DOWN:
                 self.move_cursor(Qt.Key_PageDown)
         #コピー処理1
-        if keyid in KEYS_COPY1:
+        elif keyid in KEYS_COPY1:
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir1)
         #コピー処理2
-        if keyid in KEYS_COPY2:
+        elif keyid in KEYS_COPY2:
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir2)
         #デリート処理
-        if keyid in KEYS_DELETE:
+        elif keyid in KEYS_DELETE:
             self.delete_file(self.get_selected_item_filename(), self.get_selectedIndex())
         #アプリ起動
-        if keyid in KEYS_APP:
+        elif keyid in KEYS_APP:
             self.start_app_file(self.get_selected_item_filename())
         #終了
-        if keyid in KEYS_END:
+        elif keyid in KEYS_END:
             self.close()
+        #保存済みのウインドウ・アイコンサイズへ切り替え
+        elif keyid in KEYS_OKINI_LOAD:
+            self.load_okini_size(keyid)
+        #現在のウインドウ・アイコンサイズを保存
+        elif keyid in KEYS_OKINI_SAVE:
+            self.save_okini_size(keyid)
+
+    # 保存済みのウインドウ・アイコンサイズへ切り替え
+    def load_okini_size(self, key):
+        #連続してサムネイル生成処理が稼働すると問題が発生する可能性があるのでガードしておく
+        #リスクが許容出来ればコメントアウトしてもよい
+        if self.get_status_createthumb():
+            self.show_statusbar_error(f"error : Thumbnail creation in progress.]")
+            return
+
+        sizelist = self.dic_okinisize[str(key)]
+        if sizelist:
+            self.thmsizeBox.setValue(sizelist[0])
+            self.recreate_thmbnail()
+            rect = self.geometry()
+            self.setGeometry(rect.x(), rect.y(), sizelist[1], sizelist[2])
+
+    # ウインドウ・アイコンサイズを保存
+    def save_okini_size(self, key):
+        keypos = KEYS_OKINI_SAVE.index(key)
+
+        response = QMessageBox.question(self, "確認", f"現在のアイコン・ウインドウサイズを{KEYS_OKINI_NAME[keypos]}用に保存しますか？", QMessageBox.Yes | QMessageBox.No)
+        if response != QMessageBox.Yes:
+            return
+
+        #サムネイルサイズの設定用スピンボックスの値ではなく、現在表示中のアイコンサイズを保存する
+        self.dic_okinisize[str(KEYS_OKINI_LOAD[keypos])] = [self.thmbsize, self.geometry().width(), self.geometry().height()]
+        self.show_statusbar_mes(f"saved icon and window size for {KEYS_OKINI_NAME[keypos]}.")
+        self.save_settings()    #一応このタイミングで設定ファイルへも保存
 
     # カーソル移動処理
     # ページUp/Downは、3行表示している場合は2行分移動
@@ -736,8 +787,22 @@ class ThumbnailViewer(QMainWindow):
             if item:
                 self.list_widget.setCurrentItem(item)
         else:
-            #1ファイルだけのドロップではない場合は先頭を選択状態にする
-            self.list_widget.setCurrentRow(0)
+            itempos = self.lastcheckedpos
+            #ファイルドロップによる新しいリスト表示
+            if self.lastcheckedpos < 0:
+                itempos = 0 #1ファイルだけのドロップではない場合は先頭を選択状態にする
+            self.list_widget.setCurrentRow(itempos) #サムネイルの再作成の場合は同じ選択位置に
+
+            #いったん描画をせずにscrollToItemをしても正しい位置にスクロールしない
+            #->と思ったが、UIの強制更新でもだめ
+            #QApplication.processEvents()
+            #タイマーで処理を次のイベントループに変更してみる
+            #->こちらは成功
+            QTimer.singleShot(0, self.scroll_later)
+            """
+            item = self.list_widget.currentItem()
+            self.list_widget.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+            """
 
         #横のマージンを減らしたい場合は有効にしても良い
         #縦のマージンは詰めるとアイコン下のラベルの2行表示が欠けてしまう
@@ -751,6 +816,11 @@ class ThumbnailViewer(QMainWindow):
 
         #サムネイル作成スレッドを起動
         self.start_subthread(self.file_paths, self.thmbsize)
+
+    #次のイベントループでのスクロール処理用（サムネイル作成時のフォーカス移動用）
+    def scroll_later(self):
+        item = self.list_widget.currentItem()
+        self.list_widget.scrollToItem(item, QAbstractItemView.PositionAtCenter)
 
     # ドロップファイル数とサムネイル生成状況の表示
     def show_thumbnail_info(self):
@@ -857,6 +927,11 @@ class ThumbnailViewer(QMainWindow):
         if val: self.thmbsize = val
         else: self.thmbsize = DEF_THUMBNAIL_SIZE
 
+        #アイコン・ウインドウサイズを保持するディクショナリー型
+        val = pvsubfunc.read_value_from_config(SETTINGS_FILE, DIC_OKINI_SIZE)
+        if val: self.dic_okinisize = val
+        else: self.dic_okinisize = DEF_DIC_OKINI
+
         #要素が存在しない場合の初期値指定ありの関数に置き換え
         self.soundBeep = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_BEEP, DEF_SOUND_BEEP)
         self.soundFileCopyOK = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_FCOPY_OK, DEF_SOUND_FCOPY_OK)
@@ -884,6 +959,7 @@ class ThumbnailViewer(QMainWindow):
         pvsubfunc.write_value_to_config(SETTINGS_FILE, START_EXE_APP_NAME, self.startExeAppName)
         pvsubfunc.write_value_to_config(SETTINGS_FILE, START_EXE_PYTHON_NAME, self.startExePythonName)
         pvsubfunc.write_value_to_config(SETTINGS_FILE, START_EXE_WORK_DIR, self.startExeWorkDir)
+        pvsubfunc.write_value_to_config(SETTINGS_FILE, DIC_OKINI_SIZE, self.dic_okinisize)
 
 #----------------------------------------
 # 画像のスタック表示用カスタムラベルクラス
