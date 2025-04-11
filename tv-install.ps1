@@ -2,7 +2,7 @@
 $appdispname = "Thumbnail Viewer"
 $appfilename = "ThumbnailViewer"
 $iconfilename = "res\" + $appfilename + ".ico"
-$pythonlibs = @("PyQt5", "Pillow", "send2trash")
+$pythonlibs = @("PyQt5", "send2trash", "Image", "piexif", "pillow-avif-plugin")
 #---- アプリごとに固有の部分 ----
 
 $folder = Split-Path -Parent $MyInvocation.MyCommand.Definition

@@ -1,15 +1,16 @@
 import sys, os, time, platform, shutil, ctypes, subprocess
-import pvsubfunc
+import pvsubfunc, sdfileUtility
 from send2trash import send2trash
+from PIL import Image
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QStatusBar, QMainWindow, QLabel, QStackedWidget, QPushButton, QLineEdit, QSpinBox,
-    QStyledItemDelegate, QAbstractItemView, QMessageBox
+    QStyledItemDelegate, QAbstractItemView, QMessageBox, QComboBox
 )
 from PyQt5.QtGui import (
     QPixmap, QPainter, QColor, QIcon, QPalette, QMouseEvent, QWheelEvent,
-    QMovie, QImageReader
+    QMovie, QImageReader, QImage
 )
 from PyQt5.QtCore import (
     Qt, QRunnable, QThreadPool, QThread, pyqtSignal, QEvent, QSize, QRect,
@@ -23,6 +24,20 @@ from PyQt5.QtCore import (
 #  ・多少遅くても起動時にコピー先フォルダにファイルが存在するかチェックしたい人はTrueのままで
 #========================================
 DEF_CHECK_BADGE_IS_ON = True
+
+#========================================
+# 「プロンプト情報でのフィルタ機能」
+# サムネイル作成と同時にPrompt情報を内部的に保持し、簡易なフィルター機能を実現します
+#========================================
+DEF_PROMPTFILTER_IS_ON = True
+
+#========================================
+# 「UIが固まらないようにサブスレッドであえてウェイト」
+# これをFalseにするとサムネイル作成までの時間は6割くらいに減りますが、その間UI操作がほぼ不可能になります
+# あまり大量の画像を表示しない人向け（せいぜい数百枚）
+# それか上記のバッジ機能とフィルタ機能が不要な人は全てFalseにする分にはまだ実用可能かも
+#========================================
+DEF_ASYNC_WAIT_IS_ON = True
 
 #========================================
 # 「マウスでの画像表示をダブルクリックorシングルクリック切替」
@@ -93,6 +108,7 @@ DEF_DIC_OKINI = {#iconsize,width,height,iconsize
     str(Qt.Key_9): [256, 1860, 934],     #256dotで7列3行
     str(Qt.Key_0): [320, 1656, 1126]     #320dotで5列3行
 }
+DEF_FILTER_HISTORY_MAX = 20
 
 #特定のアプリを起動する場合
 #DEF_START_APP = "C:/Program Files/Honeyview/Honeyview.exe"
@@ -111,7 +127,7 @@ DEF_EVENT_MOVELEFT = 10
 DEF_EVENT_MOVERIGHT = 11
 DEF_EVENT_PAGEUP = 12
 DEF_EVENT_PAGEDOWN = 13
-DEF_SUPPORT_IMAGE = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp")
+DEF_SUPPORT_IMAGE = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".avif")
 DEF_SUPPORT_MOVIE = (".gif", ".webp")
 WINDOW_TITLE = "Thumbnail Viewer"
 SETTINGS_FILE = "ThumbnailViewer_settings.json"
@@ -135,6 +151,7 @@ START_EXE_APP_NAME = "start-exe-app-name"
 START_EXE_PYTHON_NAME = "start-exe-python-name"
 START_EXE_WORK_DIR = "start-exe-work-dir"
 DIC_OKINI_SIZE = "dic-okini-size"
+FILTER_HISTORY_STRINGS = "history-filter-strings"
 
 #----------------------------------------
 # サムネイルビューアクラス
@@ -162,17 +179,27 @@ class ThumbnailViewer(QMainWindow):
 
         # ステータスバー右側の選択中ファイル情報とアイコンサイズ設定部品
         self.filename = QLabel("")
+        if DEF_PROMPTFILTER_IS_ON:
+            self.pfilterbtnClr = QPushButton("clear")
+            self.pfilterbtnSet = QPushButton("filter")
+            self.pfiltercombo = QComboBox()
+            self.pfiltercombo.setEditable(True)
+            #self.pfiltercombo.setCompleter(None)
         self.buttonSmall = QPushButton(f"-{DEF_THUMBNAIL_STEP}")
         self.buttonLarge = QPushButton(f"+{DEF_THUMBNAIL_STEP}")
         self.thmsizeBox = QSpinBox()
         self.buttonSet = QPushButton("set")
         label = QLabel("Thumbnail size")
-        spacer = QLabel()
         self.statusBar.addPermanentWidget(self.filename)    #選択中ファイル情報
+        if DEF_PROMPTFILTER_IS_ON:
+            self.statusBar.addPermanentWidget(self.pfilterbtnClr)   #選択中ファイル情報
+            self.statusBar.addPermanentWidget(self.pfilterbtnSet)   #選択中ファイル情報
+            self.statusBar.addPermanentWidget(self.pfiltercombo)    #選択中ファイル情報
+
         self.statusBar.addPermanentWidget(self.buttonSmall) #アイコンサイズマイナスボタン
         self.statusBar.addPermanentWidget(self.thmsizeBox)  #アイコンサイズ入力欄
         self.statusBar.addPermanentWidget(self.buttonLarge) #アイコンサイズプラスボタン
-        self.statusBar.addPermanentWidget(spacer)           #スペーサー代わりのラベル
+        self.statusBar.addPermanentWidget(QLabel(" "))       #スペーサー代わりのラベル
         self.statusBar.addPermanentWidget(self.buttonSet)   #アイコンサイズ設定ボタン
         self.statusBar.addPermanentWidget(label)            #固定文字のラベル
         self.show_statusbar_mes(f"Drag and drop image files or folders")
@@ -189,10 +216,20 @@ class ThumbnailViewer(QMainWindow):
         self.startExeWorkDir = DEF_START_EXE_WORKDIR
         self.thmbsize = DEF_THUMBNAIL_SIZE
         self.dic_okinisize = DEF_DIC_OKINI
+        self.filterstrings = []
 
         # 設定ファイルがあれば読み込み
         if os.path.exists(SETTINGS_FILE):
             self.load_settings()
+
+        # アイコンの設定
+        try:
+            #いちおう設定はしてるけどアイコンが化ける時は化ける
+            #そもそもWindows側のicon管理の問題なような気がする（これに関係なくアイコンが化ける事があるし）
+            #app.setWindowIcon(QIcon("res/ThumbnailViewer.ico"))
+            self.setWindowIcon(QIcon("res/ThumbnailViewer.ico"))
+        except Exception as e:
+            print(e)
 
         # ウィジェットの設定
         self.setAcceptDrops(True)       #ドラッグドロップの許可
@@ -209,15 +246,24 @@ class ThumbnailViewer(QMainWindow):
 
         # スタック表示画像
         self.image_label.setAlignment(Qt.AlignCenter)
+
+        if DEF_PROMPTFILTER_IS_ON:
+            self.pfiltercombo.setFixedWidth(128)
+            self.pfiltercombo.setFixedHeight(28)
+            self.set_filterbutton_Style(self.pfilterbtnSet)
+            self.set_filterbutton_Style(self.pfilterbtnClr)
+            self.pfiltercombo.addItems(self.filterstrings)
+            self.pfiltercombo.setEditText("")
+
         # ステータスバーのアイコンサイズ設定関連
-        self.buttonSmall.setFixedWidth(40)
-        self.buttonLarge.setFixedWidth(40)
         self.thmsizeBox.setMinimum(128)
         self.thmsizeBox.setMaximum(512)
         self.thmsizeBox.setValue(DEF_THUMBNAIL_SIZE)
         self.thmsizeBox.setFixedWidth(56)
-        self.buttonSet.setFixedWidth(64)
-        spacer.setFixedWidth(16)
+        self.set_sizebutton_Style(self.buttonSmall)
+        self.set_sizebutton_Style(self.buttonLarge)
+        self.set_sizebutton_Style(self.buttonSet)
+
         # ウィジェットのイベント登録
         #self.list_widget.itemDoubleClicked.connect(self.on_item_double_clicked)
         self.list_widget.itemClicked.connect(self.on_item_clicked)
@@ -227,6 +273,10 @@ class ThumbnailViewer(QMainWindow):
         self.buttonSet.clicked.connect(self.recreate_thmbnail)
         self.image_label.labelMouseEvent.connect(self.on_label_mouse_event)
         self.image_label.setFocusPolicy(Qt.StrongFocus)
+
+        if DEF_PROMPTFILTER_IS_ON:
+            self.pfilterbtnSet.clicked.connect(self.on_pfilter_set)
+            self.pfilterbtnClr.clicked.connect(self.on_pfilter_clr)
 
         # 初期値設定など
         self.set_thmbnail_size(self.thmbsize)
@@ -238,6 +288,119 @@ class ThumbnailViewer(QMainWindow):
         self.isCreateThumbnail = False
         self.webpmovie = None   # 画像表示でwebpだった場合のプレイヤー
         self.lastcheckedpos = -1    # 最後の選択項目（選択が外れた場合の処理用）
+
+    # サイズ変更ボタンのスタイル設定
+    def set_sizebutton_Style(self, button):
+        button.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #88BBEE;  /* 背景色 */
+                color: #000000;  /* 文字色 */
+            }
+            QPushButton:disabled {
+                background-color: #335577;
+                color: #000000;
+            }
+            """
+        )
+        button.setFixedWidth(40)
+
+    # フィルター機能ボタンのスタイル設定
+    def set_filterbutton_Style(self, button):
+        button.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #BBEE88;  /* 背景色 */
+                color: #000000;  /* 文字色 */
+            }
+            QPushButton:disabled {
+                background-color: #557733;
+                color: #000000;
+            }
+            """
+        )
+        button.setFixedWidth(64)
+
+    # フィルター機能のセット処理
+    def on_pfilter_set(self):
+        pos = self.get_selected_index()
+        if pos == None: pos = 0
+        fkey = self.pfiltercombo.currentText()
+
+        counthit = 0
+
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            prompt = item.data(Qt.UserRole + 2)
+            isHit = fkey.lower() in prompt.lower()
+            item.setHidden(not isHit)
+            if isHit:
+                counthit += 1
+
+        newpos = pos
+        if counthit > 0:
+            # 一件以上ヒットした検索条件を保持する
+            self.save_filter_keyword(fkey)
+
+            #フィルタ後に前後に近い選択項目に移動する
+            posbefore = -1
+            posafter = -1
+            for i in range(pos,-1,-1):
+                item = self.list_widget.item(i)
+                if not item.isHidden():
+                    posbefore = i
+                    break
+            for i in range(pos, self.list_widget.count()):
+                item = self.list_widget.item(i)
+                if not item.isHidden():
+                    posafter = i
+                    break
+            if posbefore == -1 and posafter == -1:
+                newpos = 0
+            elif posbefore == -1:
+                newpos = posafter
+            elif posafter == -1:
+                newpos = posbefore
+            else:
+                if abs(pos - posbefore) < abs(pos - posafter):
+                    newpos = posbefore
+                else:
+                    newpos = posafter
+            pvsubfunc.dbgprint(f"now : {pos}, before : {posbefore}, after:{posafter}, newpos:{newpos}")
+        else:
+            newpos = 0
+            pvsubfunc.dbgprint(f"not hit.")
+        self.list_widget.setCurrentRow(newpos)
+        QTimer.singleShot(0, self.scroll_later)
+        if counthit == 0:
+            self.show_selected_item_info(newpos,0)
+        self.show_statusbar_mes(f"{counthit} files in {self.list_widget.count()} files matched the filter.")
+
+    # フィルター機能のキーワード保存
+    def save_filter_keyword(self, fkey):
+        if not fkey: return     #空白は保存しない
+
+        if fkey in self.filterstrings:
+            self.filterstrings.remove(fkey)
+        self.filterstrings.insert(0, fkey)
+        self.filterstrings = self.filterstrings[:DEF_FILTER_HISTORY_MAX]    #履歴を個数制限
+        self.pfiltercombo.clear()
+        self.pfiltercombo.addItems(self.filterstrings)
+        self.pfiltercombo.setCurrentText(fkey)
+        #ウインドウ・アイコンサイズ保存と違って何度も実行すると思われるので、ここでは設定ファイルの保存はしない
+        #self.save_settings()
+
+    # フィルター機能のクリア処理
+    def on_pfilter_clr(self):
+        self.pfiltercombo.setEditText("")
+        pos = self.get_selected_index()
+        if pos == None: pos = 0
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            item.setHidden(False)
+        self.list_widget.setCurrentRow(pos)
+        QTimer.singleShot(0, self.scroll_later)
+        self.show_statusbar_mes(f"filter cleared.")
 
     # サムネイルサイズの設定
     def set_thmbnail_size(self, tsize):
@@ -346,7 +509,7 @@ class ThumbnailViewer(QMainWindow):
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir2)
         #デリート処理
         elif keyid in KEYS_DELETE:
-            self.delete_file(self.get_selected_item_filename(), self.get_selectedIndex())
+            self.delete_file(self.get_selected_item_filename(), self.get_selected_index())
         #アプリ起動
         elif keyid in KEYS_APP:
             self.start_app_file(self.get_selected_item_filename())
@@ -388,11 +551,11 @@ class ThumbnailViewer(QMainWindow):
         self.show_statusbar_mes(f"saved icon and window size for {KEYS_OKINI_NAME[keypos]}.")
         self.save_settings()    #一応このタイミングで設定ファイルへも保存
 
-    # カーソル移動処理
+    # カーソルキー判定処理
     # ページUp/Downは、3行表示している場合は2行分移動
     def move_cursor(self, direction):
         count = self.list_widget.count()
-        nowpos = self.get_selectedIndex()
+        nowpos = self.get_selected_index()
         hnum = self.get_list_hcount()
         vnum = max(1, self.get_list_vcount() - 1)   #表示行-1行分スクロール
         scrollnum = (hnum * vnum)   #横の項目数 * 行数で移動項目数
@@ -403,28 +566,56 @@ class ThumbnailViewer(QMainWindow):
             pos = self.lastcheckedpos
 
         if pos >= 0: #フォルダをドロップした時点で0を選択しているので-1はあり得ないが念のためチェック
-            posnew = pos
+            offset = 0
             if direction == Qt.Key_Up:
-                posnew = max(0, pos - hnum)
+                offset = -hnum
             elif direction == Qt.Key_Down:
-                posnew = min(count - 1, pos + hnum)
+                offset = hnum
             elif direction == Qt.Key_Left:
-                posnew = max(0, pos - 1)
+                offset = -1
             elif direction == Qt.Key_Right:
-                posnew = min(count - 1, pos + 1)
+                offset = 1
             elif direction == Qt.Key_PageUp:
-                posnew = max(0, pos - scrollnum)
+                offset = -scrollnum
             elif direction == Qt.Key_PageDown:
-                posnew = min(count - 1, pos + scrollnum)
+                offset = scrollnum
+            self.move_selected_item(offset)
 
-            if pos != posnew or nowpos == None:
-                self.list_widget.setCurrentRow(posnew)
-            else:
-                #self.play_wave(self.soundBeep) #鳴らすとちょっと耳障り
-                pass
+    # カーソル移動処理（実際の移動先算出）
+    # フィルター機能にあわせて、表示中の項目でのみ移動を行う
+    def move_selected_item(self, offset):
+        pos = self.get_selected_index()
+        if pos == None: return
+
+        serchofs = 1
+        serchcount = 0
+        lastcheckpos = -1
+        pvsubfunc.dbgprint(f"pos : {pos}, offset : {offset}")
+        if offset < 0: serchofs = -1
+        newpos = pos + serchofs
+        while newpos >= 0 and newpos < self.list_widget.count():
+            item = self.list_widget.item(newpos)
+            if not item.isHidden():     # 非表示でないアイテムを見つけた場合
+                lastcheckpos = newpos
+                serchcount += serchofs  # 表示中のアイテムをどれだけ移動したかカウント
+                pvsubfunc.dbgprint(f"  serchcount : {serchcount}, lastcheckpos : {lastcheckpos}")
+                if (serchcount == offset):
+                    # 指定されたオフセット分表示中のアイテムを移動したので選択
+                    self.list_widget.setCurrentRow(newpos)  # 新しい行を選択
+                    return
+            # 次のアイテムをチェック
+            newpos += serchofs
+
+        pvsubfunc.dbgprint(f"  giveup lastcheckpos : {lastcheckpos}")
+
+        # 移動方向に有効なアイテムが無かった場合は移動しない（できない）
+        if lastcheckpos >= 0:
+            # 出来る限りオフセットに近い最後の表示中アイテムに移動
+            lastcheckpos = max(0, min(lastcheckpos, self.list_widget.count() - 1))
+            self.list_widget.setCurrentRow(lastcheckpos)
 
     # 現在選択しているリストのIndex（単体）を返す（未選択時はNone）
-    def get_selectedIndex(self):
+    def get_selected_index(self):
         pos = None
         index = self.list_widget.selectedIndexes()
         if index and len(index) > 0:
@@ -486,7 +677,7 @@ class ThumbnailViewer(QMainWindow):
 
     # 画像のサイズを更新する
     def resize_ImageLabel(self, file_path):
-        pixmap = QPixmap(self.selected_file)
+        pixmap = get_QPixmap_from_imagefile(file_path)
         scaled_pixmap = pixmap.scaled(self.centralWidget().size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.image_label.setPixmap(scaled_pixmap)
 
@@ -594,15 +785,23 @@ class ThumbnailViewer(QMainWindow):
         #未指定の場合はなにもしない
         if not self.startExeAppName: return
 
-        #設定状況にあわせて外部アプリを起動
-        if self.startExePythonName and self.startExeWorkDir:
-            subprocess.Popen([self.startExeAppName, self.startExePythonName, file], cwd=self.startExeWorkDir)
-        elif self.startExeWorkDir:
-            subprocess.Popen([self.startExeAppName, file], cwd=self.startExeWorkDir)
-        elif self.startExePythonName:
-            subprocess.Popen([self.startExeAppName, self.startExePythonName, file])
-        else:
-            subprocess.Popen([self.startExeAppName, file])
+        workdir = self.startExeWorkDir
+        if not os.path.isdir(workdir):
+            self.show_statusbar_mes(f"warrning : start app workdir is not exit")
+            workdir == ""
+
+        try:
+            #設定状況にあわせて外部アプリを起動
+            if self.startExePythonName and workdir:
+                subprocess.Popen([self.startExeAppName, self.startExePythonName, file], cwd=workdir)
+            elif workdir:
+                subprocess.Popen([self.startExeAppName, file], cwd=workdir)
+            elif self.startExePythonName:
+                subprocess.Popen([self.startExeAppName, self.startExePythonName, file])
+            else:
+                subprocess.Popen([self.startExeAppName, file])
+        except Exception as e:
+            self.show_statusbar_error(f"error : start app")
 
     # ステータス表示（通常）
     def show_statusbar_mes(self, mes):
@@ -689,7 +888,7 @@ class ThumbnailViewer(QMainWindow):
         elif no == DEF_EVENT_COPYDIR2:
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir2)
         elif no == DEF_EVENT_DELETE:    # 現在は未割当
-            self.delete_file(self.get_selected_item_filename(), self.get_selectedIndex())
+            self.delete_file(self.get_selected_item_filename(), self.get_selected_index())
         elif no == DEF_EVENT_MOVELEFT:
             self.move_cursor(Qt.Key_Left)
             self.load_image_stack(self.get_selected_item_filename())
@@ -709,7 +908,7 @@ class ThumbnailViewer(QMainWindow):
 
     # アイコンリストの選択項目変更イベント
     def change_selected_item(self):
-        pos = self.get_selectedIndex()
+        pos = self.get_selected_index()
         #list_widgetはclearしてから実際に削除されるまでラグがある？のでfile_pathsでの判定に変更
         #count = self.list_widget.count()
         count = len(self.file_paths)
@@ -732,6 +931,9 @@ class ThumbnailViewer(QMainWindow):
     # サムネイル作成状態の設定
     def set_status_createthumb(self, doing):
         self.isCreateThumbnail = doing
+        if DEF_PROMPTFILTER_IS_ON:
+            self.pfilterbtnSet.setEnabled(not doing)
+            self.pfilterbtnClr.setEnabled(not doing)
         self.buttonSet.setEnabled(not doing)
 
     # サムネイル作成状態の取得
@@ -841,7 +1043,8 @@ class ThumbnailViewer(QMainWindow):
         item = QListWidgetItem(f"{short_name}\nLoading...")
         item.setIcon(QIcon(gray_pixmap))
         item.setData(Qt.UserRole, image_path)           # ファイル名フルパス
-        item.setData(Qt.UserRole + 1, (False, False))    # バッジ1、2のオンオフ
+        item.setData(Qt.UserRole + 1, (False, False))   # バッジ1、2のオンオフ
+        item.setData(Qt.UserRole + 2, "")  # プロンプト情報
         self.list_widget.addItem(item)
 
     # サムネイル作成サブスレッド開始
@@ -874,14 +1077,20 @@ class ThumbnailViewer(QMainWindow):
             else:
                 item.setText(f"{short_name}\ndecode error.")
 
-            #これをONにすると初回のサムネイル表示完了までにかなり時間がかかるようになる
+            #プロンプト情報取得もそれなりに時間はかかる
+            if DEF_PROMPTFILTER_IS_ON:
+                val = sdfileUtility.get_prompt_from_imgfile(file_path)
+                if not val: val = ""
+                item.setData(Qt.UserRole + 2, val)   # prompt情報
+
+            #これをONにすると初回のサムネイル表示完了までに時間が余計にかかるようになる
             if DEF_CHECK_BADGE_IS_ON:
                 #ファイルのコピー先ディレクトリにファイルが存在するかをバッジ表示
                 self.set_iconBadge(item, file_name)
 
-            #ドロップ数とサムネイル作成済み枚数の表示
-            self.thumbnailnum = self.thumbnailnum + 1
-            self.show_thumbnail_info()
+        #ドロップ数とサムネイル作成済み枚数の表示
+        self.thumbnailnum = self.thumbnailnum + 1
+        self.show_thumbnail_info()
 
     # サブスレッドの処理完了イベント
     def on_finished(self, strsubth):
@@ -932,6 +1141,10 @@ class ThumbnailViewer(QMainWindow):
         if val: self.dic_okinisize = val
         else: self.dic_okinisize = DEF_DIC_OKINI
 
+        self.filterstrings = pvsubfunc.read_list_from_config(SETTINGS_FILE, FILTER_HISTORY_STRINGS)
+        if not self.filterstrings:
+            self.filterstrings = []
+
         #要素が存在しない場合の初期値指定ありの関数に置き換え
         self.soundBeep = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_BEEP, DEF_SOUND_BEEP)
         self.soundFileCopyOK = pvsubfunc.read_value_from_config(SETTINGS_FILE, SOUND_FCOPY_OK, DEF_SOUND_FCOPY_OK)
@@ -960,6 +1173,7 @@ class ThumbnailViewer(QMainWindow):
         pvsubfunc.write_value_to_config(SETTINGS_FILE, START_EXE_PYTHON_NAME, self.startExePythonName)
         pvsubfunc.write_value_to_config(SETTINGS_FILE, START_EXE_WORK_DIR, self.startExeWorkDir)
         pvsubfunc.write_value_to_config(SETTINGS_FILE, DIC_OKINI_SIZE, self.dic_okinisize)
+        pvsubfunc.write_list_from_config(SETTINGS_FILE, FILTER_HISTORY_STRINGS, self.filterstrings)
 
 #----------------------------------------
 # 画像のスタック表示用カスタムラベルクラス
@@ -1073,7 +1287,8 @@ class SubThread(QThread):
                 pvsubfunc.dbgprint(f"       stop ack {self}")
                 break
             #最小のウェイト（入れると遅くなるけどUIは重くならない）
-            self.sleep_microseconds(1)
+            if DEF_ASYNC_WAIT_IS_ON:
+                self.sleep_microseconds(1)
             #ファイル削除後はもうファイルがない可能性がある
             if not os.path.exists(file_path):
                 continue
@@ -1091,7 +1306,7 @@ class SubThread(QThread):
         pvsubfunc.dbgprint(f"     stop req {self}")
     # サムネイル作成処理
     def create_thumbnail(self, file_path):
-        pixmap = QPixmap(file_path)
+        pixmap = get_QPixmap_from_imagefile(file_path)
         width = pixmap.width()
         height = pixmap.height()
         if pixmap.isNull():
@@ -1162,10 +1377,29 @@ class BadgeDelegate(QStyledItemDelegate):
             scaled_pixmap = self.icon_badge2.scaled(badge_size, badge_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             painter.drawPixmap(x_offset, y_offset, scaled_pixmap)
 
+# 画像ファイルからQPixmapを取得
+def get_QPixmap_from_imagefile(file_path):
+    if file_path.lower().endswith(".avif"):
+        pixmap = get_QPixmap_from_avif(file_path)
+    else:
+        pixmap = QPixmap(file_path)
+    return pixmap
+
+# avifファイルからQPixmapを取得
+def get_QPixmap_from_avif(file_path):
+    img = Image.open(file_path)
+    img = img.convert("RGBA")  # Ensure the image is in RGBA format
+    data = img.tobytes("raw", "RGBA")
+    qimage = QImage(data, img.width, img.height, QImage.Format_RGBA8888)
+    pixmap = QPixmap.fromImage(qimage)
+    return pixmap
+
 #----------------------------------------
 # メイン
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    #ここでアイコン設定しても変わらず。。
+    #app.setWindowIcon(QIcon("res/ThumbnailViewer.ico"))
     viewer = ThumbnailViewer()
     viewer.show()
     sys.exit(app.exec_())

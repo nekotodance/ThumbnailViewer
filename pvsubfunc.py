@@ -49,6 +49,48 @@ def write_value_to_config(config_file, key, value):
         print(f"エラー: 設定ファイルへの書き込み中に問題が発生しました: {e}")
         return False
 
+#json形式の設定ファイルから指定されたlistの値を読み込む
+def read_list_from_config(config_file, key):
+    try:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+
+        if key not in config_data:
+            print(f"エラー: キー '{key}' が設定ファイルに存在しません")
+            return None
+        if not isinstance(config_data[key], list):
+            print(f"エラー: キー '{key}' の内容がリスト型ではありません")
+            return None
+
+        return config_data.get(key, None)
+
+    except FileNotFoundError:
+        print(f"エラー: 設定ファイルが見つかりません: {config_file}")
+        return None
+    except json.JSONDecodeError:
+        print(f"エラー: 設定ファイルが正しいjson形式ではありません: {config_file}")
+        return None
+
+#json形式の設定ファイルへ指定されたキーの値を書き込む
+def write_list_from_config(config_file, key, datalist):
+    if not isinstance(datalist, list):
+        print(f"エラー: data_listはリスト型である必要があります: {e}")
+        return False
+
+    try:
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            config_data = {}
+        config_data[key] = datalist
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception as e:
+        print(f"エラー: 設定ファイルへの書き込み中に問題が発生しました: {e}")
+        return False
+
 #文字列内のダブルバックスラッシュ (\\) をシングルバックスラッシュ (\) に置換
 def replace_double_backslash(input_string):
     return input_string.replace("\\\\", "\\")
@@ -174,41 +216,6 @@ print(result)
 #結果
 ['content1', 'content2']
 """
-
-#JPG画像ファイルからコメントを取得
-def get_jpg_comment(file_path):
-    try:
-        # 画像を開く
-        img = Image.open(file_path)
-        # Exifデータを取得
-        exif_data = img._getexif()
-
-        if exif_data is None:
-            return None
-
-        # タグ名でアクセス可能な形式に変換
-        exif = {TAGS.get(tag): value for tag, value in exif_data.items() if tag in TAGS}
-
-        # コメントに関連するタグをチェック
-        user_comment = exif.get("UserComment")
-        if not user_comment:
-            user_comment = exif.get("ImageDescription")
-        if user_comment.startswith(b'UNICODE\x00'):
-            user_comment = user_comment[len(b'UNICODE\x00'):]
-        user_comment = user_comment.replace(b'\x00', b'')
-        user_comment = user_comment.decode('utf-8')
-        return user_comment
-    except Exception as e:
-        print(f"エラーが発生しました: {e}")
-        return None
-
-#自作の変換ツールを通したjpgをImageライブラリで読み込むと不要なバイトなどがあるので修正する
-def remove_jpg_comment_Exifbyte(str):
-    resstr = str
-    resstr = resstr.replace("b'","")        #ファイルの先頭コード
-    resstr = resstr.replace("\\x00'","")    #ファイルの終端コード
-    resstr = resstr.replace("\\\\", "\\")   #jpg変換時の問題？
-    return resstr
 
 # サウンド再生
 def play_wave(file_path):
