@@ -39,14 +39,10 @@ $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $exeFile
 $shortcut.Arguments = $arguments
-if (Test-Path Variable:\iconfilename) {
-    if (Test-Path $iconFile) {
-        $shortcut.IconLocation = $iconFile
-    } else {
-        Write-Host "icon file not exist."
-    }
+if (Test-Path $iconFile) {
+    $shortcut.IconLocation = $iconFile
 } else {
-    Write-Host "icon file skipped."
+    Write-Host "icon file not exist."
 }
 $shortcut.WorkingDirectory = $workingDirectory
 $shortcut.Save()

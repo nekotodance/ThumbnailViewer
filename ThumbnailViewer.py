@@ -85,8 +85,10 @@ KEYS_OKINI_NAME = ["Key_8", "Key_9", "Key_0"]
 # 全機能キー一覧（ここに登録しておかないとeventfilterとkeypressのイベントで2回の処理される）
 KEYS_FUNC_ALL = KEYS_COPY1 + KEYS_COPY2 + KEYS_DELETE + KEYS_END + KEYS_APP + KEYS_OKINI_LOAD + KEYS_OKINI_SAVE
 
-# 画像表示へ移動（このキーだけリスト表示とラベル表示で動作が変わる）
+# リスト時用の画像表示へ移動
 KEYS_DISPIMG = [Qt.Key_F, Qt.Key_Enter, Qt.Key_Return]
+# リスト時用の更新
+KEYS_RECREATE = [Qt.Key_F5]
 
 #----------------------------------------
 # 定義（初期値など）
@@ -462,8 +464,13 @@ class ThumbnailViewer(QMainWindow):
             #リスト表示時の画像表示処理
             if keyid in KEYS_DISPIMG:
                 self.open_image_stack(self.get_selected_item_filename())
+            #リスト表示時の更新処理
+            if keyid in KEYS_RECREATE:
+                if not self.get_status_createthumb():
+                    file_paths = [self.get_selected_item_filename()]
+                    self.create_thumbnails(file_paths)
             #キーの消費（eventFilter専用）
-            if keyid in KEYS_CURSOR_ALL + KEYS_FUNC_ALL + KEYS_DISPIMG:
+            if keyid in KEYS_CURSOR_ALL + KEYS_FUNC_ALL + KEYS_DISPIMG + KEYS_RECREATE:
                 return True  # イベントをここで処理したとみなして消費
         return super().eventFilter(obj, event)
 
