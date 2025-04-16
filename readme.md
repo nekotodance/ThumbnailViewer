@@ -1,4 +1,4 @@
-## ThumbnailViewerについて 0.2.12
+## ThumbnailViewerについて 0.2.13
 画像を大き目のサムネイルで表示し「フォルダ振り分けに特化」したツールです  
 マウスやキーボードで軽快に片手で振り分けできます  
 
@@ -34,8 +34,8 @@
 - gitのインストール  
 - gitでリポジトリを取得  
 `git clone https://github.com/nekotodance/ThumbnailViewer`
-- 必要なライブラリ（0.2.11で色々追加）  
-`pip install PyQt5 send2trash Image piexif pillow-avif-plugin`
+- 必要なライブラリ  
+`pip install -r requirements.txt`
 - 実行方法  
 `Python ThumbnailViewer.py`
 
@@ -165,6 +165,7 @@
 - ※対処方法検討中：相当大量の画像をドロップした後、サムネイルの作成が完了するよりも先に別の大量の画像をドロップすると処理が重くなるもしくは落ちる可能性あり  
 
 ## 変更履歴
+- 0.2.13 pipライブラリのバージョンを固定に修正  
 - 0.2.12 F5キーでの更新処理追加、他  
 - 0.2.11 フィルタ機能追加、avif対応、他（！使用するライブラリが増えています！）  
 - 0.2.10 外部アプリ起動の初期値設定バグ修正（設定ファイルを使いまわしてバージョンアップをした人限定の問題）  
