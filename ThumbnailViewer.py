@@ -277,6 +277,7 @@ class ThumbnailViewer(QMainWindow):
         self.image_label.setFocusPolicy(Qt.StrongFocus)
 
         if DEF_PROMPTFILTER_IS_ON:
+            self.pfiltercombo.activated.connect(self.on_pfilter_activate)
             self.pfilterbtnSet.clicked.connect(self.on_pfilter_set)
             self.pfilterbtnClr.clicked.connect(self.on_pfilter_clr)
 
@@ -323,8 +324,15 @@ class ThumbnailViewer(QMainWindow):
         )
         button.setFixedWidth(64)
 
+    # フィルター機能のEnterもしくはリスト選択処理
+    def on_pfilter_activate(self, index):
+        self.doPfilterSet()
+
     # フィルター機能のセット処理
     def on_pfilter_set(self):
+        self.doPfilterSet()
+
+    def doPfilterSet(self):
         pos = self.get_selected_index()
         if pos == None: pos = 0
         fkey = self.pfiltercombo.currentText()
@@ -939,6 +947,7 @@ class ThumbnailViewer(QMainWindow):
     def set_status_createthumb(self, doing):
         self.isCreateThumbnail = doing
         if DEF_PROMPTFILTER_IS_ON:
+            self.pfiltercombo.setEnabled(not doing)
             self.pfilterbtnSet.setEnabled(not doing)
             self.pfilterbtnClr.setEnabled(not doing)
         self.buttonSet.setEnabled(not doing)
