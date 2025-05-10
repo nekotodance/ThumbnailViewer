@@ -101,6 +101,7 @@ DEF_FCOPY_DIR1 = "W:/_temp/ai"
 DEF_FCOPY_DIR2 = "W:/_temp/ai2"
 DEF_BADGE_ICON1 = "TV_badge1_128.png"
 DEF_BADGE_ICON2 = "TV_badge2_128.png"
+DEF_DARKFILTER = "darkfilter_512.png"
 DEF_SOUND_BEEP = "PromptViewer_beep.wav"
 DEF_SOUND_FCOPY_OK = "PromptViewer_filecopyok.wav"
 DEF_SOUND_F_CANSEL = "PromptViewer_filecansel.wav"
@@ -1362,11 +1363,14 @@ class BadgeDelegate(QStyledItemDelegate):
         super().__init__(parent)
         # アイコンのバッジ
         self.icon_badge1 = None
+        self.icon_badge2 = None
+        self.icon_darkfilter = None
         if os.path.exists(DEF_BADGE_ICON1):
             self.icon_badge1 = QPixmap(DEF_BADGE_ICON1)
-        self.icon_badge2 = None
         if os.path.exists(DEF_BADGE_ICON2):
             self.icon_badge2 = QPixmap(DEF_BADGE_ICON2)
+        if os.path.exists(DEF_DARKFILTER):
+            self.icon_darkfilter = QPixmap(DEF_DARKFILTER)
 
     def paint(self, painter, option, index):
         super().paint(painter, option, index)
@@ -1375,20 +1379,22 @@ class BadgeDelegate(QStyledItemDelegate):
 
         icon_rect = option.rect
         icon_width = icon_rect.width()
+        icon_height = icon_rect.height()
         badge_size = icon_width // 4     #バッジサイズはアイコンの1/4
         badge_margin = 2
-        badge_left = QRect(icon_rect.x() + badge_margin,
-                            icon_rect.y() + badge_margin,
-                            badge_size, badge_size)
         y_offset = icon_rect.y() + badge_margin
 
         painter.setRenderHint(QPainter.Antialiasing)
 
-        if isBdg_right:
+        if (isBdg_right or isBdg_Left) and self.icon_darkfilter:
+            scaled_pixmap = self.icon_darkfilter.scaled(icon_width, icon_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            painter.drawPixmap(icon_rect.x(), icon_rect.y(), scaled_pixmap)
+
+        if isBdg_right and self.icon_badge1:
             x_offset = icon_rect.x() + icon_width - badge_size - badge_margin
             scaled_pixmap = self.icon_badge1.scaled(badge_size, badge_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             painter.drawPixmap(x_offset, y_offset, scaled_pixmap)
-        if isBdg_Left:
+        if isBdg_Left and self.icon_badge2:
             x_offset = icon_rect.x() + badge_margin
             scaled_pixmap = self.icon_badge2.scaled(badge_size, badge_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             painter.drawPixmap(x_offset, y_offset, scaled_pixmap)
