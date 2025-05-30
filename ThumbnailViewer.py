@@ -106,10 +106,11 @@ DEF_SOUND_BEEP = "PromptViewer_beep.wav"
 DEF_SOUND_FCOPY_OK = "PromptViewer_filecopyok.wav"
 DEF_SOUND_F_CANSEL = "PromptViewer_filecansel.wav"
 DEF_SOUND_F_DELETE = "PromptViewer_filedelete.wav"
+#横幅と縦幅の算出方法がディスプレイの拡大率によっても変わるかも（参考まで）
 DEF_DIC_OKINI = {#iconsize,width,height,iconsize
-    str(Qt.Key_8): [128, 1366, 892],     #128dotで10列5行
-    str(Qt.Key_9): [256, 1860, 934],     #256dotで7列3行
-    str(Qt.Key_0): [320, 1656, 1126]     #320dotで5列3行
+    str(Qt.Key_8): [128, 1366, 892],     #128dotで10列5行（横：134x列数+26、縦：171x行数+37）
+    str(Qt.Key_9): [256, 1860, 934],     #256dotで7列3行（横：262x列数+26、縦：299x行数+37）
+    str(Qt.Key_0): [320, 1656, 1126]     #320dotで5列3行（横：326x列数+26、縦：363x行数+37）
 }
 DEF_FILTER_HISTORY_MAX = 20
 
@@ -834,9 +835,14 @@ class ThumbnailViewer(QMainWindow):
             self.setWindowTitle(WINDOW_TITLE)
             return
         countlen = len(str(count))
-        self.setWindowTitle(f"[{pos + 1:0{countlen}}/{count}] {self.get_selected_item_filename()}")
-        #ここは結構見にくい位置なので、サムネイル作成状況とかどうでもいいものに変更
-        #self.filename.setText(f"{self.get_selected_item_filename()} [{pos + 1:0{countlen}}/{count}] ")
+        item = self.list_widget.item(pos)
+        imagesize = item.data(Qt.UserRole + 3)
+        #サムネイル生成毎の処理に入れるのがタイミングとしては正しいが、処理が重くなるので例外的にここで処理する
+        if not imagesize:
+            pixmap = get_QPixmap_from_imagefile(item.data(Qt.UserRole))
+            imagesize = f"{pixmap.width()} x {pixmap.height()}"
+
+        self.setWindowTitle(f"[{pos + 1:0{countlen}}/{count}] {self.get_selected_item_filename()} ({imagesize})")
 
     # サウンド再生
     def play_wave(self, file_name):
@@ -1062,6 +1068,7 @@ class ThumbnailViewer(QMainWindow):
         item.setData(Qt.UserRole, image_path)           # ファイル名フルパス
         item.setData(Qt.UserRole + 1, (False, False))   # バッジ1、2のオンオフ
         item.setData(Qt.UserRole + 2, "")  # プロンプト情報
+        item.setData(Qt.UserRole + 3, "")  # サイズ情報
         self.list_widget.addItem(item)
 
     # サムネイル作成サブスレッド開始
@@ -1091,6 +1098,7 @@ class ThumbnailViewer(QMainWindow):
             if icon:
                 item.setIcon(icon)
                 item.setText(f"{short_name}\n{original_size}")
+                item.setData(Qt.UserRole + 3, original_size)   # サイズ情報
             else:
                 item.setText(f"{short_name}\ndecode error.")
 
