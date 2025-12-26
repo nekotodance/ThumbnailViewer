@@ -88,7 +88,7 @@ KEYS_FUNC_ALL = KEYS_COPY1 + KEYS_COPY2 + KEYS_DELETE + KEYS_END + KEYS_APP + KE
 # リスト時用の画像表示へ移動
 KEYS_DISPIMG = [Qt.Key_F, Qt.Key_Enter, Qt.Key_Return]
 # リスト時用の更新
-KEYS_RECREATE = [Qt.Key_F5]
+KEYS_RECREATE = [Qt.Key_F5,Qt.Key_N]
 
 #----------------------------------------
 # 定義（初期値など）
@@ -133,7 +133,7 @@ DEF_EVENT_PAGEUP = 12
 DEF_EVENT_PAGEDOWN = 13
 DEF_SUPPORT_IMAGE = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".avif")
 DEF_SUPPORT_MOVIE = (".gif", ".webp")
-WINDOW_TITLE = "Thumbnail Viewer"
+WINDOW_TITLE = "Thumbnail Viewer 0.2.17"
 SETTINGS_FILE = "ThumbnailViewer_settings.json"
 APP_WIDTH = 800
 APP_HEIGHT = 480
@@ -761,6 +761,22 @@ class ThumbnailViewer(QMainWindow):
             #管理テーブルからファイルを消す
             self.file_paths.remove(file)
         if os.path.exists(file):
+            if self.list_widget.count() == 0:
+                #表示する画像がないので空リストに戻るしかない
+                self.backToList()
+            else:
+                if pos < self.list_widget.count() - 1:
+                    #まだ先のrowが存在するので元々の次の画像に移動
+                    self.list_widget.setCurrentRow(pos)
+                else:
+                    #最終画像なので元々の前の画像に移動
+                    self.list_widget.setCurrentRow(self.list_widget.count() - 1)
+
+            #画像表示中であれば新しい画像を表示
+            if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
+                self.load_image_stack(self.get_selected_item_filename())
+
+            #実際の削除を後に移動（動画再生中だと削除に失敗するので）
             try:
                 fullpath = os.path.abspath(file)
                 #----memo----
@@ -775,21 +791,6 @@ class ThumbnailViewer(QMainWindow):
                 isRemoveOK = True
             except Exception as e:
                 self.show_statusbar_error(f"error : delete [{file}]")
-
-        if self.list_widget.count() == 0:
-            #表示する画像がないので空リストに戻るしかない
-            self.backToList()
-        else:
-            if pos < self.list_widget.count() - 1:
-                #まだ先のrowが存在するので元々の次の画像に移動
-                self.list_widget.setCurrentRow(pos)
-            else:
-                #最終画像なので元々の前の画像に移動
-                self.list_widget.setCurrentRow(self.list_widget.count() - 1)
-
-        #画像表示中であれば新しい画像を表示
-        if self.stack.currentIndex() == 1:  # 画像表示中のみ有効
-            self.load_image_stack(self.get_selected_item_filename())
 
         #右下のステータスを更新
         self.change_selected_item()
