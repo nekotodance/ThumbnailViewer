@@ -2,6 +2,7 @@ import sys, os, time, platform, shutil, ctypes, subprocess
 import pvsubfunc, sdfileUtility
 from send2trash import send2trash
 from PIL import Image
+from natsort import os_sorted
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
@@ -133,7 +134,7 @@ DEF_EVENT_PAGEUP = 12
 DEF_EVENT_PAGEDOWN = 13
 DEF_SUPPORT_IMAGE = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".avif")
 DEF_SUPPORT_MOVIE = (".gif", ".webp")
-WINDOW_TITLE = "Thumbnail Viewer 0.2.17"
+WINDOW_TITLE = "Thumbnail Viewer 0.2.18"
 SETTINGS_FILE = "ThumbnailViewer_settings.json"
 APP_WIDTH = 800
 APP_HEIGHT = 480
@@ -980,20 +981,26 @@ class ThumbnailViewer(QMainWindow):
             dropOneFile = paths[0]
             paths[0] = os.path.dirname(paths[0])
 
+        file_lists = []
         #ドロップされたファイル名リストを作成する（サムネイルは後）
         for path in paths:
             if os.path.isdir(path):
                 # フォルダの場合
                 for file_name in os.listdir(path):
-                    #file_path = os.path.join(path, file_name)
                     file_path = f"{path}/{file_name}"
                     if self.is_image(file_path):
-                        self.add_placeholder(file_path)
-                        self.file_paths.append(file_path)
+                        file_lists.append(file_path)
             elif self.is_image(path):
                 # ファイルの場合
-                self.add_placeholder(path)
-                self.file_paths.append(path)
+                file_lists.append(path)
+
+        # ファイラーでのソート順序と合わせる
+        # Windowsでのみ確認しているが、natsortが吸収してくれているはず
+        file_lists = os_sorted(file_lists)
+        for path in file_lists:
+            self.add_placeholder(path)
+            self.file_paths.append(path)
+
         #ドロップ数とサムネイル作成済み枚数の表示
         self.show_statusbar_mes(f"{len(self.file_paths)} file dropped.")
         self.show_thumbnail_info()
