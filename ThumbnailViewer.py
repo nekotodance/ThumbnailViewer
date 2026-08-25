@@ -18,6 +18,9 @@ from PyQt5.QtCore import (
     QTimer
 )
 
+# ウインドウタイトル Version
+WINDOW_TITLE = "Thumbnail Viewer 0.2.19"
+
 #========================================
 # 「初回のファイルコピー状態表示バッジ機能のON/OFF」
 # 大量の画像を表示する場合、初回のファイル存在チェックに時間がかかり結構ストレスです
@@ -73,6 +76,8 @@ KEYS_COPY1 = [Qt.Key_E, Qt.Key_Slash]
 KEYS_COPY2 = [Qt.Key_Q, Qt.Key_Period]
 # デリート
 KEYS_DELETE = [Qt.Key_H, Qt.Key_Delete]
+# ムーブ
+KEYS_MOVE = [Qt.Key_M]
 # 終了
 KEYS_END = [Qt.Key_Escape, Qt.Key_Comma]
 # 外部アプリにて画像を開く
@@ -84,7 +89,7 @@ KEYS_OKINI_SAVE = [Qt.Key_F8, Qt.Key_F9, Qt.Key_F10]
 # 設定保存時の確認用のテキスト（お気に入り画面サイズのキーを変更する場合にはここもあわせて）
 KEYS_OKINI_NAME = ["Key_8", "Key_9", "Key_0"]
 # 全機能キー一覧（ここに登録しておかないとeventfilterとkeypressのイベントで2回の処理される）
-KEYS_FUNC_ALL = KEYS_COPY1 + KEYS_COPY2 + KEYS_DELETE + KEYS_END + KEYS_APP + KEYS_OKINI_LOAD + KEYS_OKINI_SAVE
+KEYS_FUNC_ALL = KEYS_COPY1 + KEYS_COPY2 + KEYS_DELETE + KEYS_MOVE + KEYS_END + KEYS_APP + KEYS_OKINI_LOAD + KEYS_OKINI_SAVE
 
 # リスト時用の画像表示へ移動
 KEYS_DISPIMG = [Qt.Key_F, Qt.Key_Enter, Qt.Key_Return]
@@ -128,13 +133,13 @@ DEF_EVENT_IMAGEORLIST = 0
 DEF_EVENT_COPYDIR1 = 1
 DEF_EVENT_COPYDIR2 = 2
 DEF_EVENT_DELETE = 3
+DEF_EVENT_MOVE = 4
 DEF_EVENT_MOVELEFT = 10
 DEF_EVENT_MOVERIGHT = 11
 DEF_EVENT_PAGEUP = 12
 DEF_EVENT_PAGEDOWN = 13
 DEF_SUPPORT_IMAGE = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".avif")
 DEF_SUPPORT_MOVIE = (".gif", ".webp")
-WINDOW_TITLE = "Thumbnail Viewer 0.2.18"
 SETTINGS_FILE = "ThumbnailViewer_settings.json"
 APP_WIDTH = 800
 APP_HEIGHT = 480
@@ -528,6 +533,10 @@ class ThumbnailViewer(QMainWindow):
         #デリート処理
         elif keyid in KEYS_DELETE:
             self.delete_file(self.get_selected_item_filename(), self.get_selected_index())
+        #ムーブ処理
+        elif keyid in KEYS_MOVE:
+            self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir1)
+            self.delete_file(self.get_selected_item_filename(), self.get_selected_index())
         #アプリ起動
         elif keyid in KEYS_APP:
             self.start_app_file(self.get_selected_item_filename())
@@ -911,7 +920,7 @@ class ThumbnailViewer(QMainWindow):
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir1)
         elif no == DEF_EVENT_COPYDIR2:
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir2)
-        elif no == DEF_EVENT_DELETE:    # 現在は未割当
+        elif no == DEF_EVENT_DELETE:
             self.delete_file(self.get_selected_item_filename(), self.get_selected_index())
         elif no == DEF_EVENT_MOVELEFT:
             self.move_cursor(Qt.Key_Left)
@@ -1097,23 +1106,30 @@ class ThumbnailViewer(QMainWindow):
 
     # サブスレッドからの進捗状況イベント
     def on_progress(self, progress, file_path, icon, original_size):
+        isCorrectFile = os.path.exists(file_path) and (os.path.getsize(file_path) > 0)
+
         item = next((item for i in range(self.list_widget.count())
                 if (item := self.list_widget.item(i)).data(Qt.UserRole) == file_path), None)
         if item:
             # サムネイルと元画像サイズを更新
             file_name = os.path.basename(file_path)
             short_name = self.truncate_filename(file_name)
-            if icon:
-                item.setIcon(icon)
-                item.setText(f"{short_name}\n{original_size}")
-                item.setData(Qt.UserRole + 3, original_size)   # サイズ情報
+            if isCorrectFile:
+                if icon:
+                    item.setIcon(icon)
+                    item.setText(f"{short_name}\n{original_size}")
+                    item.setData(Qt.UserRole + 3, original_size)   # サイズ情報
+                else:
+                    item.setText(f"{short_name}\ndecode error.")
             else:
-                item.setText(f"{short_name}\ndecode error.")
+                item.setText(f"{short_name}\nAbnormal file.")
 
             #プロンプト情報取得もそれなりに時間はかかる
             if DEF_PROMPTFILTER_IS_ON:
-                val = sdfileUtility.get_prompt_from_imgfile(file_path)
-                if not val: val = ""
+                val = ""
+                if isCorrectFile:
+                    val = sdfileUtility.get_prompt_from_imgfile(file_path)
+                    if not val: val = ""
                 item.setData(Qt.UserRole + 2, val)   # prompt情報
 
             #これをONにすると初回のサムネイル表示完了までに時間が余計にかかるようになる
@@ -1215,6 +1231,7 @@ class CustomLabel(QLabel):
 
     def __init__(self):
         super().__init__()
+
     # マウスボタン押下イベント
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:     #左クリック
@@ -1230,6 +1247,7 @@ class CustomLabel(QLabel):
         elif event.button() == Qt.XButton2:     #サイドボタン2
             self.mouse_notification(DEF_EVENT_DELETE)
         """
+        super().mousePressEvent(event)
     # マウスホイールイベント
     def wheelEvent(self, event: QWheelEvent):
         delta = event.angleDelta().y()
@@ -1339,22 +1357,32 @@ class SubThread(QThread):
         pvsubfunc.dbgprint(f"     stop req {self}")
     # サムネイル作成処理
     def create_thumbnail(self, file_path):
-        pixmap = get_QPixmap_from_imagefile(file_path)
-        width = pixmap.width()
-        height = pixmap.height()
-        if pixmap.isNull():
-            return None
-        # アスペクト比を維持してリサイズ
-        thumb_size = self.tsize
-        scaled_pixmap = pixmap.scaled(thumb_size, thumb_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        # 余白部分を黒塗りで埋める
-        result_pixmap = QPixmap(thumb_size, thumb_size)
-        result_pixmap.fill(Qt.black)
-        painter = QPainter(result_pixmap)
-        x_offset = (thumb_size - scaled_pixmap.width()) // 2
-        y_offset = (thumb_size - scaled_pixmap.height()) // 2
-        painter.drawPixmap(x_offset, y_offset, scaled_pixmap)
-        painter.end()
+        result_pixmap = None
+        width = height = 0
+        try:
+            if os.path.exists(file_path) and os.path.getsize(file_path) == 0:
+                return result_pixmap, width, height
+            elif not os.path.exists(file_path):
+                return result_pixmap, width, height
+            pixmap = get_QPixmap_from_imagefile(file_path)
+            width = pixmap.width()
+            height = pixmap.height()
+            if pixmap.isNull():
+                return result_pixmap, width, height
+            # アスペクト比を維持してリサイズ
+            thumb_size = self.tsize
+            scaled_pixmap = pixmap.scaled(thumb_size, thumb_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            # 余白部分を黒塗りで埋める
+            result_pixmap = QPixmap(thumb_size, thumb_size)
+            result_pixmap.fill(Qt.black)
+            painter = QPainter(result_pixmap)
+            x_offset = (thumb_size - scaled_pixmap.width()) // 2
+            y_offset = (thumb_size - scaled_pixmap.height()) // 2
+            painter.drawPixmap(x_offset, y_offset, scaled_pixmap)
+            painter.end()
+        except:
+            result_pixmap = None
+            width = height = 0
         return result_pixmap, width, height
     # イメージサイズ文字列作成
     def get_imagesize_str(self, width, height):
