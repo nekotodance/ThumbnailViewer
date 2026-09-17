@@ -3,6 +3,7 @@ import pvsubfunc, sdfileUtility
 from send2trash import send2trash
 from PIL import Image
 from natsort import os_sorted
+from pathlib import Path
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
@@ -19,7 +20,7 @@ from PyQt5.QtCore import (
 )
 
 # ウインドウタイトル Version
-WINDOW_TITLE = "Thumbnail Viewer 0.2.19"
+WINDOW_TITLE = "Thumbnail Viewer 0.2.20"
 
 #========================================
 # 「初回のファイルコピー状態表示バッジ機能のON/OFF」
@@ -128,6 +129,7 @@ DEF_FILTER_HISTORY_MAX = 20
 DEF_START_EXE_APP = "C:/tool/git/PromptViewer/venv/Scripts/pythonw.exe"
 DEF_START_EXE_PYFILE = "C:/tool/git/PromptViewer/PromptViewer.py"
 DEF_START_EXE_WORKDIR = "C:/tool/git/PromptViewer"
+DEF_DELETE_TXTFILE = 0  # 0:off, 1:on
 
 DEF_EVENT_IMAGEORLIST = 0
 DEF_EVENT_COPYDIR1 = 1
@@ -162,6 +164,7 @@ START_EXE_PYTHON_NAME = "start-exe-python-name"
 START_EXE_WORK_DIR = "start-exe-work-dir"
 DIC_OKINI_SIZE = "dic-okini-size"
 FILTER_HISTORY_STRINGS = "history-filter-strings"
+DELETE_TXTFILE = "delete-textfile"
 
 #----------------------------------------
 # サムネイルビューアクラス
@@ -227,6 +230,7 @@ class ThumbnailViewer(QMainWindow):
         self.thmbsize = DEF_THUMBNAIL_SIZE
         self.dic_okinisize = DEF_DIC_OKINI
         self.filterstrings = []
+        self.delete_txtfile = DEF_DELETE_TXTFILE
 
         # 設定ファイルがあれば読み込み
         if os.path.exists(SETTINGS_FILE):
@@ -532,7 +536,7 @@ class ThumbnailViewer(QMainWindow):
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir2)
         #デリート処理
         elif keyid in KEYS_DELETE:
-            self.delete_file(self.get_selected_item_filename(), self.get_selected_index())
+            self.delete_file(self.get_selected_item_filename(), self.get_selected_index(), self.delete_txtfile)
         #ムーブ処理
         elif keyid in KEYS_MOVE:
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir1)
@@ -764,7 +768,7 @@ class ThumbnailViewer(QMainWindow):
             self.show_statusbar_error(mes)
 
     # ファイルのデリート処理
-    def delete_file(self, file, pos):
+    def delete_file(self, file, pos, deletetxtfile = 0):
         isRemoveOK = False
         if pos < self.list_widget.count():
             self.list_widget.takeItem(pos)
@@ -788,7 +792,6 @@ class ThumbnailViewer(QMainWindow):
 
             #実際の削除を後に移動（動画再生中だと削除に失敗するので）
             try:
-                fullpath = os.path.abspath(file)
                 #----memo----
                 # os.removeだと即時削除、send2trashライブラリを使うとゴミ箱に入る
                 # os.path.abspath(file)を使っているのは、
@@ -797,6 +800,9 @@ class ThumbnailViewer(QMainWindow):
                 #------------
                 #os.remove(file)     #きれいさっぱり消したい人用
                 send2trash(os.path.abspath(file))    #念のためゴミ箱に捨てたい人用
+                if deletetxtfile == 1:
+                    txtfile = Path(file).with_suffix(".txt")
+                    send2trash(os.path.abspath(txtfile))
                 self.show_statusbar_mes(f"deleted [{file}]")
                 isRemoveOK = True
             except Exception as e:
@@ -921,7 +927,7 @@ class ThumbnailViewer(QMainWindow):
         elif no == DEF_EVENT_COPYDIR2:
             self.copy_file(self.get_selected_item_filename(), self.imageFileCopyDir2)
         elif no == DEF_EVENT_DELETE:
-            self.delete_file(self.get_selected_item_filename(), self.get_selected_index())
+            self.delete_file(self.get_selected_item_filename(), self.get_selected_index(), self.delete_txtfile)
         elif no == DEF_EVENT_MOVELEFT:
             self.move_cursor(Qt.Key_Left)
             self.load_image_stack(self.get_selected_item_filename())
@@ -1204,6 +1210,7 @@ class ThumbnailViewer(QMainWindow):
         self.startExeAppName = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_APP_NAME, DEF_START_EXE_APP)
         self.startExePythonName = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_PYTHON_NAME, DEF_START_EXE_PYFILE)
         self.startExeWorkDir = pvsubfunc.read_value_from_config(SETTINGS_FILE, START_EXE_WORK_DIR, DEF_START_EXE_WORKDIR)
+        self.delete_txtfile = pvsubfunc.read_value_from_config(SETTINGS_FILE, DELETE_TXTFILE, DEF_DELETE_TXTFILE)
 
     # 設定ファイルのセーブ
     def save_settings(self):
@@ -1223,6 +1230,7 @@ class ThumbnailViewer(QMainWindow):
         pvsubfunc.write_value_to_config(SETTINGS_FILE, START_EXE_WORK_DIR, self.startExeWorkDir)
         pvsubfunc.write_value_to_config(SETTINGS_FILE, DIC_OKINI_SIZE, self.dic_okinisize)
         pvsubfunc.write_list_from_config(SETTINGS_FILE, FILTER_HISTORY_STRINGS, self.filterstrings)
+        pvsubfunc.write_value_to_config(SETTINGS_FILE, DELETE_TXTFILE, self.delete_txtfile)
 
 #----------------------------------------
 # 画像のスタック表示用カスタムラベルクラス
